@@ -1,0 +1,31 @@
+name: Package Local Worker
+
+on:
+  push:
+    branches:
+      - agent/plain-python-initializer
+  workflow_dispatch:
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build safe local worker zip
+        run: |
+          mkdir -p dist/Diehl_VIN_Local_Worker
+          cp worker/DiehlInitializer.py dist/Diehl_VIN_Local_Worker/
+          cp worker/START_WORKER.cmd dist/Diehl_VIN_Local_Worker/
+          cp worker/README_LOCAL.txt dist/Diehl_VIN_Local_Worker/
+          cp worker/server.py dist/Diehl_VIN_Local_Worker/
+          cp worker/configure_workbook.py dist/Diehl_VIN_Local_Worker/
+          cp worker/vin_lookup.py dist/Diehl_VIN_Local_Worker/
+          cp worker/dtna_login_and_sync.py dist/Diehl_VIN_Local_Worker/
+          cp worker/requirements.txt dist/Diehl_VIN_Local_Worker/
+          cd dist
+          zip -r Diehl_VIN_Local_Worker.zip Diehl_VIN_Local_Worker
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Diehl_VIN_Local_Worker
+          path: dist/Diehl_VIN_Local_Worker.zip
+          if-no-files-found: error
