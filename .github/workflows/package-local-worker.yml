@@ -17,6 +17,7 @@ jobs:
       - name: Build safe local worker zip
         run: |
           mkdir -p dist/Diehl_VIN_Local_Worker
+          cp "worker/START DIEHL VIN.cmd" dist/Diehl_VIN_Local_Worker/
           cp worker/DiehlInitializer.py dist/Diehl_VIN_Local_Worker/
           cp worker/START_WORKER.cmd dist/Diehl_VIN_Local_Worker/
           cp worker/README_LOCAL.txt dist/Diehl_VIN_Local_Worker/
