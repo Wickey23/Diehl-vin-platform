@@ -17,6 +17,8 @@ VENV = ROOT / '.venv'
 CONFIG = ROOT / 'config.json'
 SITE = 'https://diehl-vin-platform.vercel.app'
 PORT = 8765
+LOG_DIR = ROOT / 'logs'
+WORKER_LOG = LOG_DIR / 'worker.log'
 
 
 def venv_python() -> Path:
@@ -114,24 +116,44 @@ def start_worker() -> None:
         return
 
     py = venv_python()
-    flags = getattr(subprocess, 'CREATE_NEW_CONSOLE', 0)
-    proc = subprocess.Popen([str(py), str(ROOT / 'server.py')], cwd=str(ROOT), creationflags=flags)
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    log_handle = WORKER_LOG.open('a', encoding='utf-8', buffering=1)
+    log_handle.write(f'\n[{datetime_stamp()}] Starting Diehl VIN worker\n')
+
+    flags = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
+    proc = subprocess.Popen(
+        [str(py), str(ROOT / 'server.py')],
+        cwd=str(ROOT),
+        creationflags=flags,
+        stdout=log_handle,
+        stderr=subprocess.STDOUT,
+    )
 
     deadline = time.time() + 8
     while time.time() < deadline:
         if proc.poll() is not None:
+            log_handle.flush()
+            log_handle.close()
             raise RuntimeError(
                 f'The local worker exited during startup with code {proc.returncode}. '
-                'Check the Diehl VIN Local Worker window for the exact error.'
+                f'Open {WORKER_LOG} for the exact error.'
             )
         if port_is_busy():
-            print('Diehl VIN worker started on 127.0.0.1:8765.')
+            print('Diehl VIN worker started in the background on 127.0.0.1:8765.')
+            # The child process owns the inherited log handle now; closing our copy is safe.
+            log_handle.close()
             return
         time.sleep(.25)
 
+    try:
+        proc.terminate()
+    except Exception:
+        pass
+    log_handle.flush()
+    log_handle.close()
     raise RuntimeError(
         'The local worker did not open port 8765 within 8 seconds. '
-        'Check the Diehl VIN Local Worker window for the exact startup error.'
+        f'Open {WORKER_LOG} for the exact startup error.'
     )
 
 
@@ -157,7 +179,7 @@ def main() -> None:
         raise RuntimeError('This initializer is for Windows.')
 
     print('Diehl VIN Local Worker')
-    print('One-click visible local setup. No PowerShell, no hidden VBS, no registry changes.')
+    print('One-click visible local setup. The background worker runs without a console window.')
 
     first_setup = not VENV.exists() or not configured_workbook()
     ensure_environment()
