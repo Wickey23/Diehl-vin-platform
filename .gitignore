@@ -11,3 +11,8 @@ node_modules
 browser_profile/
 data/
 output/
+worker/worker.env
+worker/worker_state.db
+worker/browser_profiles/
+worker/results-slot-*.json
+worker/.venv/
