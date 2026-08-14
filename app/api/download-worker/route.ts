@@ -8,7 +8,7 @@ const BRANCH = 'main';
 const FILES = [
   'worker/START DIEHL VIN.cmd',
   'worker/DiehlInitializer.py',
-  'worker/server.py',
+  'worker/service_v4.py',
   'worker/configure_workbook.py',
   'worker/vin_lookup.py',
   'worker/dtna_login_and_sync.py',
@@ -29,37 +29,32 @@ export async function GET() {
     const folder = zip.folder('Diehl_VIN_Local_Worker');
     if (!folder) throw new Error('Could not create ZIP folder.');
 
-    await Promise.all(
-      FILES.map(async (path) => {
-        const name = path.replace(/^worker\//, '');
-        folder.file(name, await fetchText(path));
-      })
-    );
+    await Promise.all(FILES.map(async (path) => {
+      folder.file(path.replace(/^worker\//, ''), await fetchText(path));
+    }));
 
-    const readme = [
-      'DIEHL VIN LOCAL WORKER',
+    folder.file('READ ME FIRST.txt', [
+      'DIEHL VIN LOCAL WORKER v4',
       '',
-      'FIRST TIME',
-      '1. Extract this ZIP to a normal folder.',
+      'FIRST TIME ON A PC',
+      '1. Extract this ZIP.',
       '2. Double-click START DIEHL VIN.cmd.',
-      '3. Choose your existing Excel workbook when asked.',
-      '4. The worker starts and the Diehl VIN website opens automatically.',
+      '3. Choose your existing Excel workbook once.',
+      '4. The worker starts in the background and the website opens.',
       '',
-      'LATER',
-      'Double-click START DIEHL VIN.cmd only if the worker is not already running.',
-      'If the worker is already running, the launcher simply opens the website.',
+      'AFTER THAT',
+      'Just double-click START DIEHL VIN.cmd when you need to start/restart the local worker.',
+      'The permanent install lives under LocalAppData\\DiehlVINWorker and reuses the same Python environment and workbook config.',
       '',
-      'The worker remains local to this computer. DTNA login/MFA and Excel stay local.',
-    ].join('\r\n');
-    folder.file('READ ME FIRST.txt', readme);
+      'DTNA login/MFA, browser profile, and Excel remain local to this Windows computer.',
+    ].join('\r\n'));
 
     const body = await zip.generateAsync({ type: 'arraybuffer', compression: 'DEFLATE', compressionOptions: { level: 6 } });
-
     return new Response(body, {
       status: 200,
       headers: {
         'Content-Type': 'application/zip',
-        'Content-Disposition': 'attachment; filename="Diehl_VIN_Local_Worker.zip"',
+        'Content-Disposition': 'attachment; filename="Diehl_VIN_Local_Worker_v4.zip"',
         'Cache-Control': 'no-store, max-age=0',
       },
     });
