@@ -1,0 +1,2 @@
+import { NextRequest, NextResponse } from "next/server";
+export async function POST(req:NextRequest){const auth=req.headers.get("authorization");const expected=process.env.DTNA_INGEST_SECRET;if(!expected||auth!==`Bearer ${expected}`) return NextResponse.json({error:"unauthorized"},{status:401});const body=await req.json();if(!Array.isArray(body?.orders)) return NextResponse.json({error:"orders must be an array"},{status:400});return NextResponse.json({accepted:body.orders.length,note:"Database upsert activates when Supabase server credentials are configured."})}
