@@ -3,7 +3,10 @@ name: Package Local Worker
 on:
   push:
     branches:
-      - agent/plain-python-initializer
+      - main
+    paths:
+      - 'worker/**'
+      - '.github/workflows/package-local-worker.yml'
   workflow_dispatch:
 
 jobs:
