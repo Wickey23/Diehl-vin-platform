@@ -23,6 +23,8 @@ PROFILE_ROOT = ROOT / 'browser_profiles'
 DTNA_SCRIPT = ROOT / 'dtna_login_and_sync.py'
 PROFILE_ROOT.mkdir(exist_ok=True)
 
+WORKER_VERSION = '3.2'
+
 
 def now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -52,7 +54,7 @@ def port() -> int:
         return 8765
 
 
-app = FastAPI(title='Diehl Local VIN Worker', version='3.0')
+app = FastAPI(title='Diehl Local VIN Worker', version=WORKER_VERSION)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -75,12 +77,12 @@ async def private_network_access(request: Request, call_next):
     return response
 
 
-excel_lock = threading.Lock()
+excel_lock = threading.RLock()
 stop_event = threading.Event()
 
 
 def db() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=30)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -136,7 +138,7 @@ def proc_running(*names: str) -> bool:
 def workbook_status() -> dict[str, Any]:
     path = workbook_path()
     exists = bool(str(path)) and path.exists()
-    return {
+    info = {
         'exists': exists,
         'path': str(path) if str(path) else '',
         'name': path.name if str(path) else '',
@@ -144,36 +146,168 @@ def workbook_status() -> dict[str, Any]:
         'modified': datetime.fromtimestamp(path.stat().st_mtime).isoformat() if exists else None,
         'extension': path.suffix.lower() if str(path) else '',
     }
+    if exists:
+        try:
+            read_master(set(), probe_only=True)
+            info['accessible'] = True
+            info['accessError'] = ''
+        except Exception as exc:
+            info['accessible'] = False
+            info['accessError'] = str(exc)
+    else:
+        info['accessible'] = False
+        info['accessError'] = 'Workbook does not exist.'
+    return info
 
 
 def serializable(value: Any) -> Any:
     return value.isoformat() if hasattr(value, 'isoformat') else value
 
 
-def read_master(vins: set[str]) -> dict[str, dict[str, Any]]:
-    path = workbook_path()
-    if not path.exists() or path.suffix.lower() not in {'.xlsx', '.xlsm'}:
-        return {}
-    result: dict[str, dict[str, Any]] = {}
-    with excel_lock:
-        wb = load_workbook(path, read_only=True, data_only=True, keep_vba=path.suffix.lower() == '.xlsm')
-        ws = wb['VIN Data'] if 'VIN Data' in wb.sheetnames else wb.active
-        rows = ws.iter_rows(values_only=True)
-        headers = [str(x or '').strip() for x in next(rows)]
-        idx = {header: i for i, header in enumerate(headers) if header}
-        vin_index = idx.get('VIN', 0)
-        for row in rows:
-            vin = str(row[vin_index] or '').strip().upper()
-            if vin in vins:
-                result[vin] = {
-                    headers[i]: serializable(row[i])
-                    for i in range(min(len(headers), len(row)))
-                    if headers[i] and row[i] not in (None, '')
-                }
+def _find_open_workbook(excel: Any, path: Path):
+    target = os.path.normcase(os.path.abspath(str(path)))
+    try:
+        for candidate in excel.Workbooks:
+            try:
+                if os.path.normcase(os.path.abspath(str(candidate.FullName))) == target:
+                    return candidate
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return None
+
+
+def _read_master_com(path: Path, vins: set[str], probe_only: bool = False) -> dict[str, dict[str, Any]]:
+    import pythoncom
+    import win32com.client
+
+    pythoncom.CoInitialize()
+    excel = None
+    wb = None
+    opened_here = False
+    created_excel = False
+    try:
+        try:
+            excel = win32com.client.GetActiveObject('Excel.Application')
+        except Exception:
+            excel = win32com.client.DispatchEx('Excel.Application')
+            excel.Visible = False
+            excel.DisplayAlerts = False
+            created_excel = True
+
+        wb = _find_open_workbook(excel, path)
+        if wb is None:
+            # Excel can usually open a OneDrive workbook read-only even when the
+            # file is currently open/sync-locked and direct ZipFile access fails.
+            wb = excel.Workbooks.Open(str(path), UpdateLinks=0, ReadOnly=True, IgnoreReadOnlyRecommended=True)
+            opened_here = True
+
+        try:
+            ws = wb.Worksheets('VIN Data')
+        except Exception:
+            ws = wb.Worksheets(1)
+
+        used_cols = max(1, int(ws.UsedRange.Columns.Count))
+        headers: list[str] = []
+        for col in range(1, used_cols + 1):
+            headers.append(str(ws.Cells(1, col).Value or '').strip())
+        if 'VIN' not in headers:
+            raise RuntimeError('Selected workbook must contain a VIN column in row 1.')
+        if probe_only:
+            return {}
+
+        vin_col = headers.index('VIN') + 1
+        last_row = int(ws.Cells(ws.Rows.Count, vin_col).End(-4162).Row)
+        result: dict[str, dict[str, Any]] = {}
+        for row_num in range(2, max(2, last_row) + 1):
+            vin = str(ws.Cells(row_num, vin_col).Value or '').strip().upper()
+            if vin and vin in vins:
+                row_data: dict[str, Any] = {}
+                for col, header in enumerate(headers, start=1):
+                    if not header:
+                        continue
+                    value = ws.Cells(row_num, col).Value
+                    if value not in (None, ''):
+                        row_data[header] = serializable(value)
+                result[vin] = row_data
                 if len(result) == len(vins):
                     break
-        wb.close()
-    return result
+        return result
+    finally:
+        try:
+            if wb is not None and opened_here:
+                wb.Close(SaveChanges=False)
+        except Exception:
+            pass
+        try:
+            if excel is not None and created_excel:
+                excel.Quit()
+        except Exception:
+            pass
+        pythoncom.CoUninitialize()
+
+
+def _read_master_openpyxl(path: Path, vins: set[str], probe_only: bool = False) -> dict[str, dict[str, Any]]:
+    last_exc: Exception | None = None
+    for attempt in range(3):
+        wb = None
+        try:
+            wb = load_workbook(path, read_only=True, data_only=True, keep_vba=path.suffix.lower() == '.xlsm')
+            ws = wb['VIN Data'] if 'VIN Data' in wb.sheetnames else wb.active
+            rows = ws.iter_rows(values_only=True)
+            headers = [str(x or '').strip() for x in next(rows)]
+            if 'VIN' not in headers:
+                raise RuntimeError('Selected workbook must contain a VIN column in row 1.')
+            if probe_only:
+                return {}
+            idx = {header: i for i, header in enumerate(headers) if header}
+            vin_index = idx['VIN']
+            result: dict[str, dict[str, Any]] = {}
+            for row in rows:
+                vin = str(row[vin_index] or '').strip().upper()
+                if vin in vins:
+                    result[vin] = {
+                        headers[i]: serializable(row[i])
+                        for i in range(min(len(headers), len(row)))
+                        if headers[i] and row[i] not in (None, '')
+                    }
+                    if len(result) == len(vins):
+                        break
+            return result
+        except Exception as exc:
+            last_exc = exc
+            time.sleep(0.35 * (attempt + 1))
+        finally:
+            try:
+                if wb is not None:
+                    wb.close()
+            except Exception:
+                pass
+    raise RuntimeError(f'Excel workbook is temporarily unavailable: {last_exc}')
+
+
+def read_master(vins: set[str], probe_only: bool = False) -> dict[str, dict[str, Any]]:
+    path = workbook_path()
+    if not path.exists() or path.suffix.lower() not in {'.xlsx', '.xlsm'}:
+        if probe_only:
+            raise RuntimeError('The selected Excel workbook does not exist.')
+        return {}
+
+    with excel_lock:
+        com_error = None
+        try:
+            return _read_master_com(path, vins, probe_only=probe_only)
+        except Exception as exc:
+            com_error = exc
+        try:
+            return _read_master_openpyxl(path, vins, probe_only=probe_only)
+        except Exception as file_exc:
+            raise RuntimeError(
+                'Cannot access the selected Excel workbook right now. '
+                'If it is syncing in OneDrive, wait for sync to finish or open it in Excel and try again. '
+                f'Excel error: {com_error}; file error: {file_exc}'
+            ) from file_exc
 
 
 def normalize(vin: str, row: dict[str, Any]) -> dict[str, Any]:
@@ -224,24 +358,26 @@ def excel_com_write(vin: str, result: dict[str, Any]) -> None:
         excel = None
         wb = None
         opened_here = False
+        created_excel = False
         try:
             try:
                 excel = win32com.client.GetActiveObject('Excel.Application')
             except Exception:
                 excel = win32com.client.DispatchEx('Excel.Application')
                 excel.Visible = False
+                excel.DisplayAlerts = False
+                created_excel = True
 
-            target = os.path.normcase(os.path.abspath(str(path)))
-            for candidate in excel.Workbooks:
-                try:
-                    if os.path.normcase(os.path.abspath(candidate.FullName)) == target:
-                        wb = candidate
-                        break
-                except Exception:
-                    pass
+            wb = _find_open_workbook(excel, path)
             if wb is None:
-                wb = excel.Workbooks.Open(str(path), UpdateLinks=0, ReadOnly=False)
+                wb = excel.Workbooks.Open(str(path), UpdateLinks=0, ReadOnly=False, IgnoreReadOnlyRecommended=True)
                 opened_here = True
+
+            if bool(getattr(wb, 'ReadOnly', False)):
+                raise RuntimeError(
+                    'The workbook is open read-only or locked by OneDrive/another Excel session. '
+                    'Close duplicate copies and allow OneDrive to finish syncing, then retry.'
+                )
 
             try:
                 ws = wb.Worksheets('VIN Data')
@@ -254,7 +390,6 @@ def excel_com_write(vin: str, result: dict[str, Any]) -> None:
                 value = str(ws.Cells(1, col).Value or '').strip()
                 if value:
                     headers[value] = col
-
             if 'VIN' not in headers:
                 raise RuntimeError('Selected workbook must contain a VIN column in row 1.')
 
@@ -265,7 +400,7 @@ def excel_com_write(vin: str, result: dict[str, Any]) -> None:
                     headers[heading] = used_cols
 
             vin_col = headers['VIN']
-            last_row = int(ws.Cells(ws.Rows.Count, vin_col).End(-4162).Row)  # xlUp
+            last_row = int(ws.Cells(ws.Rows.Count, vin_col).End(-4162).Row)
             row_num = None
             for row in range(2, max(2, last_row) + 1):
                 if str(ws.Cells(row, vin_col).Value or '').strip().upper() == vin:
@@ -275,10 +410,9 @@ def excel_com_write(vin: str, result: dict[str, Any]) -> None:
             if row_num is None:
                 row_num = max(2, last_row + 1)
                 if row_num > 2:
-                    source = ws.Rows(row_num - 1)
-                    source.Copy()
-                    ws.Rows(row_num).PasteSpecial(Paste=-4122)  # xlPasteFormats
-                    ws.Rows(row_num).PasteSpecial(Paste=6)      # xlPasteValidation
+                    ws.Rows(row_num - 1).Copy()
+                    ws.Rows(row_num).PasteSpecial(Paste=-4122)
+                    ws.Rows(row_num).PasteSpecial(Paste=6)
                     excel.CutCopyMode = False
                 ws.Cells(row_num, vin_col).Value = vin
 
@@ -289,13 +423,16 @@ def excel_com_write(vin: str, result: dict[str, Any]) -> None:
 
             wb.Save()
         finally:
-            if wb is not None and opened_here:
-                wb.Close(SaveChanges=True)
-            if excel is not None and opened_here:
-                try:
+            try:
+                if wb is not None and opened_here:
+                    wb.Close(SaveChanges=True)
+            except Exception:
+                pass
+            try:
+                if excel is not None and created_excel:
                     excel.Quit()
-                except Exception:
-                    pass
+            except Exception:
+                pass
             pythoncom.CoUninitialize()
 
 
@@ -311,8 +448,8 @@ def run_lookup_command(vins: list[str], slot: int) -> dict[str, Any]:
     env['DIEHL_RESULT_FILE'] = str(result_file)
     env['DIEHL_WORKER_SLOT'] = str(slot)
     env['DIEHL_BROWSER_PROFILE'] = str(PROFILE_ROOT / f'worker-{slot}')
-    subprocess.run(command, shell=True, cwd=str(ROOT), env=env, check=False)
-    if not result_file.exists():
+    completed = subprocess.run(command, shell=True, cwd=str(ROOT), env=env, check=False)
+    if completed.returncode != 0 or not result_file.exists():
         return {}
     try:
         raw = json.loads(result_file.read_text(encoding='utf-8'))
@@ -325,20 +462,21 @@ def run_lookup_command(vins: list[str], slot: int) -> dict[str, Any]:
     return {}
 
 
-def process_item(item: dict[str, Any], slot: int) -> tuple[dict[str, Any] | None, str | None]:
+def process_item(item: dict[str, Any], slot: int, existing_row: dict[str, Any] | None = None) -> tuple[dict[str, Any] | None, str | None]:
     vin = item['vin']
-    existing = read_master({vin})
-    if vin in existing:
-        return normalize(vin, existing[vin]), None
+    try:
+        if existing_row:
+            return normalize(vin, existing_row), None
 
-    looked_up = run_lookup_command([vin], slot)
-    result = looked_up.get(vin) if isinstance(looked_up, dict) else None
-    if result:
-        result.setdefault('vin', vin)
-        excel_com_write(vin, result)
-        return result, None
-
-    return None, 'VIN is not already in the selected workbook and the DTNA per-VIN lookup engine did not return a result.'
+        looked_up = run_lookup_command([vin], slot)
+        result = looked_up.get(vin) if isinstance(looked_up, dict) else None
+        if result:
+            result.setdefault('vin', vin)
+            excel_com_write(vin, result)
+            return result, None
+        return None, 'VIN is not already in the selected workbook and the DTNA lookup did not return a result.'
+    except Exception as exc:
+        return None, str(exc)
 
 
 def scheduler() -> None:
@@ -350,6 +488,7 @@ def scheduler() -> None:
                 conn.close()
                 time.sleep(.8)
                 continue
+
             options = json.loads(batch['options'] or '{}')
             workers = max(1, min(8, int(options.get('workers', 1))))
             conn.execute("update batches set status='running', started_at=coalesce(started_at, ?) where id=?", (now(), batch['id']))
@@ -357,6 +496,7 @@ def scheduler() -> None:
                 "select * from items where batch_id=? and status in ('queued','retry') order by queue_position limit ?",
                 (batch['id'], workers),
             ).fetchall()
+
             if not pending:
                 remaining = conn.execute(
                     "select count(*) as n from items where batch_id=? and status in ('queued','retry','running')",
@@ -368,6 +508,17 @@ def scheduler() -> None:
                 conn.close()
                 time.sleep(.4)
                 continue
+
+            # Read the workbook ONCE for this group instead of every worker thread
+            # reopening the same OneDrive file independently.
+            pending_vins = {str(item['vin']).upper() for item in pending}
+            try:
+                existing_rows = read_master(pending_vins)
+                workbook_error = None
+            except Exception as exc:
+                existing_rows = {}
+                workbook_error = str(exc)
+
             for item in pending:
                 conn.execute(
                     "update items set status='running', started_at=?, attempts=attempts+1 where id=?",
@@ -376,22 +527,54 @@ def scheduler() -> None:
             conn.commit()
             conn.close()
 
-            threads = []
-            def run_one(item_row: sqlite3.Row, slot: int):
-                result, error = process_item(dict(item_row), slot)
+            if workbook_error:
                 c = db()
-                if result:
-                    c.execute(
-                        "update items set status='complete', result=?, error_message=null, completed_at=? where id=?",
-                        (json.dumps(result, default=str), now(), item_row['id']),
-                    )
-                else:
+                for item in pending:
                     c.execute(
                         "update items set status='error', error_message=?, completed_at=? where id=?",
-                        (error, now(), item_row['id']),
+                        (workbook_error, now(), item['id']),
                     )
                 c.commit()
                 c.close()
+                time.sleep(1)
+                continue
+
+            threads = []
+
+            def run_one(item_row: sqlite3.Row, slot: int):
+                c = None
+                try:
+                    vin = str(item_row['vin']).upper()
+                    result, error = process_item(dict(item_row), slot, existing_rows.get(vin))
+                    c = db()
+                    if result:
+                        c.execute(
+                            "update items set status='complete', result=?, error_message=null, completed_at=? where id=?",
+                            (json.dumps(result, default=str), now(), item_row['id']),
+                        )
+                    else:
+                        c.execute(
+                            "update items set status='error', error_message=?, completed_at=? where id=?",
+                            (error or 'Unknown worker error', now(), item_row['id']),
+                        )
+                    c.commit()
+                except Exception as exc:
+                    try:
+                        if c is None:
+                            c = db()
+                        c.execute(
+                            "update items set status='error', error_message=?, completed_at=? where id=?",
+                            (str(exc), now(), item_row['id']),
+                        )
+                        c.commit()
+                    except Exception:
+                        pass
+                finally:
+                    try:
+                        if c is not None:
+                            c.close()
+                    except Exception:
+                        pass
 
             for index, item in enumerate(pending):
                 thread = threading.Thread(target=run_one, args=(item, index + 1), daemon=True)
@@ -442,6 +625,7 @@ def health():
     wb = workbook_status()
     return {
         'ok': True,
+        'version': WORKER_VERSION,
         'worker': {
             'worker_id': socket.gethostname(),
             'hostname': socket.gethostname(),
@@ -456,15 +640,16 @@ def health():
 @app.get('/initializer/status')
 def initializer_status():
     wb = workbook_status()
+    excel_status = 'ok' if wb.get('accessible') else ('missing' if not wb['exists'] else 'warning')
     checks = [
-        {'id': 'worker', 'label': 'Local Diehl worker', 'status': 'ok', 'detail': f'Running on 127.0.0.1:{port()}'},
-        {'id': 'excel', 'label': 'Selected existing workbook', 'status': 'ok' if wb['exists'] else 'missing', 'detail': wb['path'] or 'No workbook selected'},
+        {'id': 'worker', 'label': 'Local Diehl worker', 'status': 'ok', 'detail': f'Running v{WORKER_VERSION} on 127.0.0.1:{port()}'},
+        {'id': 'excel', 'label': 'Selected existing workbook', 'status': excel_status, 'detail': wb.get('accessError') or wb['path'] or 'No workbook selected'},
         {'id': 'dtna', 'label': 'DTNA automation', 'status': 'ok' if DTNA_SCRIPT.exists() else 'missing', 'detail': str(DTNA_SCRIPT)},
-        {'id': 'browser', 'label': 'Persistent DTNA browser', 'status': 'ok' if (PROFILE_ROOT.exists()) else 'warning', 'detail': str(PROFILE_ROOT)},
-        {'id': 'excel-com', 'label': 'Microsoft Excel desktop', 'status': 'ok' if proc_running('excel') else 'warning', 'detail': 'Excel can be opened automatically when a write is required.'},
+        {'id': 'browser', 'label': 'Persistent DTNA browser', 'status': 'ok' if PROFILE_ROOT.exists() else 'warning', 'detail': str(PROFILE_ROOT)},
+        {'id': 'excel-com', 'label': 'Microsoft Excel desktop', 'status': 'ok' if proc_running('excel') else 'warning', 'detail': 'Excel will be opened automatically when workbook access is required.'},
     ]
     missing = [x for x in checks if x['status'] == 'missing']
-    return {'ready': not missing, 'checks': checks, 'summary': f"{len(checks)-len(missing)} of {len(checks)} checks available", 'workbook': wb}
+    return {'ready': not missing and bool(wb.get('accessible')), 'checks': checks, 'summary': f"{len(checks)-len(missing)} of {len(checks)} checks available", 'workbook': wb}
 
 
 @app.post('/workbook/select')
@@ -503,6 +688,13 @@ def create_batch(body: BatchIn):
     vins = clean_vins(body.vins)
     if not vins:
         raise HTTPException(400, 'Enter at least one valid 17-character VIN.')
+
+    wb = workbook_status()
+    if not wb['exists']:
+        raise HTTPException(409, 'The configured Excel workbook cannot be found. Choose the workbook again on the Initializer page.')
+    if not wb.get('accessible'):
+        raise HTTPException(409, wb.get('accessError') or 'The configured Excel workbook is not accessible right now.')
+
     batch_id = str(uuid.uuid4())
     options = {
         'workers': max(1, min(8, body.workers)),
