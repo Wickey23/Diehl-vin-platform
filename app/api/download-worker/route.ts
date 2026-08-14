@@ -53,7 +53,7 @@ export async function GET() {
     ].join('\r\n');
     folder.file('READ ME FIRST.txt', readme);
 
-    const body = await zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE', compressionOptions: { level: 6 } });
+    const body = await zip.generateAsync({ type: 'arraybuffer', compression: 'DEFLATE', compressionOptions: { level: 6 } });
 
     return new Response(body, {
       status: 200,
