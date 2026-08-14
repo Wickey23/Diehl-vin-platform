@@ -19,11 +19,39 @@ export default function Checker(){
     return d;
   }
 
-  async function refresh(id=batch?.id){
+  async function workerReachable(){
+    const controller=new AbortController();
+    const timer=setTimeout(()=>controller.abort(),1200);
     try{
-      const w=await local('/health');setWorker(w.worker||null);setOnline(true);
-      if(id){const d=await local('/batches/'+id);if(d.batch){setBatch(d.batch);setItems(d.items||[])}}
-    }catch(e:any){setWorker(null);setOnline(false);setMsg('Local Diehl worker is not running. Run the initializer once on this computer.')}
+      const r=await fetch(LOCAL+'/openapi.json',{cache:'no-store',signal:controller.signal});
+      return r.ok;
+    }catch{return false}finally{clearTimeout(timer)}
+  }
+
+  async function healthDetails(){
+    const controller=new AbortController();
+    const timer=setTimeout(()=>controller.abort(),1200);
+    try{
+      const r=await fetch(LOCAL+'/health',{cache:'no-store',signal:controller.signal});
+      if(!r.ok)return null;
+      return await r.json();
+    }catch{return null}finally{clearTimeout(timer)}
+  }
+
+  async function refresh(id=batch?.id){
+    const reachable=await workerReachable();
+    if(!reachable){
+      setWorker(null);setOnline(false);setMsg('Local Diehl worker is not running. Press START DIEHL VIN on this computer.');return;
+    }
+
+    setOnline(true);
+    const h=await healthDetails();
+    if(h?.worker)setWorker(h.worker);
+
+    if(id){
+      try{const d=await local('/batches/'+id);if(d.batch){setBatch(d.batch);setItems(d.items||[])}}
+      catch(e:any){setMsg(e.message||'Worker is running, but batch status could not be loaded.')}
+    }
   }
 
   useEffect(()=>{local('/batches/resumable').then(d=>{if(d.batch){setBatch(d.batch);refresh(d.batch.id)}}).catch(()=>{});refresh()},[]);
@@ -54,7 +82,7 @@ export default function Checker(){
         <div className="row" style={{marginTop:12}}><button className="primary wide" disabled={busy||!vins.length||!online} onClick={start}>{busy?'Starting…':'Start'}</button><button className="ghost" onClick={()=>setText('')}>Clear</button></div>
         <div className="divider"/>
         <label>Parallel DTNA browser workers</label><select value={workers} onChange={e=>setWorkers(+e.target.value)}>{[1,2,3,4,5,6,7,8].map(n=><option key={n}>{n}</option>)}</select>
-        <div className="workerbox"><b>This computer</b><p className="help">{online?`${worker?.hostname} · ${worker?.master_workbook||'No workbook selected'}`:'Run the initializer package once.'}</p><button className="ghost" onClick={openDtna} disabled={!online}>Open DTNA / Login</button></div>
+        <div className="workerbox"><b>This computer</b><p className="help">{online?`${worker?.hostname||'Local worker'} · ${worker?.master_workbook||'Worker connected'}`:'Press START DIEHL VIN on this computer.'}</p><button className="ghost" onClick={openDtna} disabled={!online}>Open DTNA / Login</button></div>
       </div></section>
 
       <section className="card results"><div className="cardhead"><span>Results</span><span className="muted">{batch?`${done} verified · ${errors} errors · ${running} running`:'No active batch'}</span></div>
