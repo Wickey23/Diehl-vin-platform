@@ -1,10 +1,5 @@
 import { NextResponse } from 'next/server';
 import { adminDb } from '../../../../lib/supabase-admin';
 function ok(req:Request){const s=process.env.DTNA_WORKER_SECRET;return !!s&&req.headers.get('x-worker-secret')===s}
-export async function POST(req:Request){
-  if(!ok(req)) return NextResponse.json({error:'Unauthorized'},{status:401});
-  try{const body=await req.json();const db=adminDb();const workerId=String(body.workerId||'windows-worker');
-    const {error}=await db.from('worker_status').upsert({worker_id:workerId,hostname:body.hostname||'',dtna_status:body.dtnaStatus||'unknown',outlook_status:body.outlookStatus||'unknown',onedrive_status:body.onedriveStatus||'unknown',master_workbook:body.masterWorkbook||'',details:body.details||{},last_seen:new Date().toISOString()},{onConflict:'worker_id'});if(error)throw error;return NextResponse.json({ok:true});
-  }catch(e){return NextResponse.json({error:e instanceof Error?e.message:'Heartbeat failed'},{status:500})}
-}
-export async function GET(){try{const db=adminDb();const {data}=await db.from('worker_status').select('*').order('last_seen',{ascending:false}).limit(1).maybeSingle();return NextResponse.json({worker:data||null})}catch(e){return NextResponse.json({worker:null},{status:200})}}
+export async function POST(req:Request){if(!ok(req))return NextResponse.json({error:'Unauthorized'},{status:401});try{const b=await req.json();const db=adminDb();const {error}=await db.from('worker_status').upsert({worker_id:String(b.workerId||'windows-worker'),hostname:b.hostname||'',dtna_status:b.dtnaStatus||'unknown',outlook_status:'removed',onedrive_status:'not-used',master_workbook:b.masterWorkbook||'',details:b.details||{},last_seen:new Date().toISOString()},{onConflict:'worker_id'});if(error)throw error;return NextResponse.json({ok:true})}catch(e){return NextResponse.json({error:e instanceof Error?e.message:'Heartbeat failed'},{status:500})}}
+export async function GET(){try{const db=adminDb();const {data}=await db.from('worker_status').select('*').order('last_seen',{ascending:false}).limit(1).maybeSingle();if(!data)return NextResponse.json({worker:null,online:false});const age=Date.now()-new Date(data.last_seen).getTime();return NextResponse.json({worker:data,online:age<30000})}catch{return NextResponse.json({worker:null,online:false})}}
