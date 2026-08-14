@@ -1,0 +1,13 @@
+node_modules
+.next
+.env
+.env.local
+.env.*.local
+.vercel
+*.xlsx
+*.xls
+*.csv
+*.jsonl
+browser_profile/
+data/
+output/
