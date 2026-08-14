@@ -22,9 +22,11 @@ path = filedialog.askopenfilename(
 if not path:
     raise SystemExit('No workbook selected.')
 
+python = ROOT / '.venv' / 'Scripts' / 'python.exe'
+lookup = f'"{python}" "{ROOT / "vin_lookup.py"}"'
 CONFIG.write_text(json.dumps({
     'masterWorkbook': path,
-    'vinLookupCommand': '',
+    'vinLookupCommand': lookup,
     'port': 8765
 }, indent=2), encoding='utf-8')
 
