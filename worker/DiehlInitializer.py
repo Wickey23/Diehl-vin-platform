@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
-import socket
 import subprocess
 import sys
 import time
+import urllib.request
 import webbrowser
 from pathlib import Path
 import tkinter as tk
@@ -15,43 +16,58 @@ from tkinter import filedialog, messagebox
 ROOT = Path(__file__).resolve().parent
 VENV = ROOT / '.venv'
 CONFIG = ROOT / 'config.json'
+REQUIREMENTS = ROOT / 'requirements.txt'
 SITE = 'https://diehl-vin-platform.vercel.app'
-PORT = 8765
+PING = 'http://127.0.0.1:8765/ping'
 LOG_DIR = ROOT / 'logs'
 WORKER_LOG = LOG_DIR / 'worker.log'
+SERVICE = ROOT / 'service_v4.py'
 
 
 def venv_python() -> Path:
     return VENV / 'Scripts' / 'python.exe'
 
 
-def run_visible(args: list[str], title: str) -> None:
-    print('\n' + '=' * 72)
-    print(title)
-    print('=' * 72)
-    print(' '.join(str(x) for x in args))
+def run(args: list[str], label: str) -> None:
+    print(label + '...')
     result = subprocess.run(args, cwd=str(ROOT))
     if result.returncode != 0:
-        raise RuntimeError(f'{title} failed with exit code {result.returncode}.')
+        raise RuntimeError(f'{label} failed with exit code {result.returncode}.')
 
 
-def port_is_busy(port: int = PORT) -> bool:
+def requirements_hash() -> str:
+    return hashlib.sha256(REQUIREMENTS.read_bytes()).hexdigest() if REQUIREMENTS.exists() else ''
+
+
+def ensure_environment() -> None:
+    py = venv_python()
+    if not py.exists():
+        run([sys.executable, '-m', 'venv', str(VENV)], 'Creating local Python environment')
+    if not py.exists():
+        raise RuntimeError('The local Python environment was not created correctly.')
+
+    marker = VENV / '.diehl_requirements_hash'
+    expected = requirements_hash()
+    current = marker.read_text(encoding='utf-8').strip() if marker.exists() else ''
+    if current != expected:
+        run([str(py), '-m', 'pip', 'install', '-r', str(REQUIREMENTS)], 'Installing/updating required packages')
+        marker.write_text(expected, encoding='utf-8')
+
+
+def read_config() -> dict:
     try:
-        with socket.create_connection(('127.0.0.1', port), timeout=.5):
-            return True
+        return json.loads(CONFIG.read_text(encoding='utf-8')) if CONFIG.exists() else {}
     except Exception:
-        return False
+        return {}
+
+
+def configured_workbook() -> str:
+    path = str(read_config().get('masterWorkbook') or '').strip()
+    return path if path and Path(path).exists() else ''
 
 
 def choose_workbook() -> str:
-    root = tk.Tk()
-    root.withdraw()
-    root.attributes('-topmost', True)
-    messagebox.showinfo(
-        'Diehl VIN Initializer',
-        'Choose the EXISTING Excel workbook this computer should use.\n\n'
-        'This is only required on first setup or when you choose to change the workbook.'
-    )
+    root = tk.Tk(); root.withdraw(); root.attributes('-topmost', True)
     path = filedialog.askopenfilename(
         title='Choose existing VIN master workbook',
         filetypes=[('Excel workbooks', '*.xlsx *.xlsm'), ('All files', '*.*')]
@@ -62,86 +78,56 @@ def choose_workbook() -> str:
     return path
 
 
-def read_config() -> dict:
-    if not CONFIG.exists():
-        return {}
-    try:
-        return json.loads(CONFIG.read_text(encoding='utf-8'))
-    except Exception:
-        return {}
-
-
-def configured_workbook() -> str:
-    path = str(read_config().get('masterWorkbook') or '').strip()
-    return path if path and Path(path).exists() else ''
-
-
-def configure(workbook: str) -> None:
+def save_config(workbook: str) -> None:
     py = venv_python()
-    lookup = f'"{py}" "{ROOT / "vin_lookup.py"}"'
     CONFIG.write_text(json.dumps({
         'masterWorkbook': workbook,
-        'vinLookupCommand': lookup,
-        'port': PORT,
+        'vinLookupCommand': f'"{py}" "{ROOT / "vin_lookup.py"}"',
+        'port': 8765,
     }, indent=2), encoding='utf-8')
 
 
-def datetime_stamp() -> str:
-    return time.strftime('%Y-%m-%d %H:%M:%S')
-
-
-def ensure_environment() -> None:
-    if not VENV.exists():
-        run_visible([sys.executable, '-m', 'venv', str(VENV)], 'Creating local Python environment')
-
-    py = venv_python()
-    if not py.exists():
-        raise RuntimeError('The local Python environment was not created correctly.')
-
-    marker = VENV / '.diehl_requirements_ready'
-    requirements = ROOT / 'requirements.txt'
-    needs_install = not marker.exists()
-    if marker.exists() and requirements.exists():
-        needs_install = marker.stat().st_mtime < requirements.stat().st_mtime
-
-    if needs_install:
-        run_visible([str(py), '-m', 'pip', 'install', '--upgrade', 'pip'], 'Updating pip')
-        run_visible([str(py), '-m', 'pip', 'install', '-r', str(requirements)], 'Installing required Python packages')
-        marker.write_text(datetime_stamp(), encoding='utf-8')
+def ping_worker(timeout: float = 1.0) -> dict | None:
+    try:
+        with urllib.request.urlopen(PING, timeout=timeout) as response:
+            data = json.loads(response.read().decode('utf-8', errors='replace'))
+        if data.get('ok') and data.get('product') == 'DiehlVINWorker':
+            return data
+    except Exception:
+        pass
+    return None
 
 
 def start_worker() -> None:
-    if port_is_busy():
-        print('A local service is already listening on port 8765.')
+    current = ping_worker()
+    if current and str(current.get('version')) == '4.0':
+        print('Diehl VIN worker v4 is already running.')
         return
 
-    py = venv_python()
+    if not SERVICE.exists():
+        raise RuntimeError('service_v4.py is missing. Download a fresh Local Worker package.')
+
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     log_handle = WORKER_LOG.open('a', encoding='utf-8', buffering=1)
-    log_handle.write(f'\n[{datetime_stamp()}] Starting Diehl VIN worker\n')
+    log_handle.write(f'\n[{time.strftime("%Y-%m-%d %H:%M:%S")}] Starting Diehl VIN Worker v4\n')
 
-    flags = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
     proc = subprocess.Popen(
-        [str(py), str(ROOT / 'server.py')],
+        [str(venv_python()), str(SERVICE)],
         cwd=str(ROOT),
-        creationflags=flags,
+        creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
         stdout=log_handle,
         stderr=subprocess.STDOUT,
     )
 
-    deadline = time.time() + 8
+    deadline = time.time() + 10
     while time.time() < deadline:
         if proc.poll() is not None:
-            log_handle.flush()
             log_handle.close()
-            raise RuntimeError(
-                f'The local worker exited during startup with code {proc.returncode}. '
-                f'Open {WORKER_LOG} for the exact error.'
-            )
-        if port_is_busy():
-            print('Diehl VIN worker started in the background on 127.0.0.1:8765.')
-            # The child process owns the inherited log handle now; closing our copy is safe.
+            raise RuntimeError(f'Worker exited during startup with code {proc.returncode}. See {WORKER_LOG}.')
+        info = ping_worker(.5)
+        if info and str(info.get('version')) == '4.0':
             log_handle.close()
+            print('Diehl VIN worker v4 is ready.')
             return
         time.sleep(.25)
 
@@ -149,53 +135,37 @@ def start_worker() -> None:
         proc.terminate()
     except Exception:
         pass
-    log_handle.flush()
     log_handle.close()
-    raise RuntimeError(
-        'The local worker did not open port 8765 within 8 seconds. '
-        f'Open {WORKER_LOG} for the exact startup error.'
-    )
+    raise RuntimeError(f'Worker did not become ready. See {WORKER_LOG}.')
 
 
-def show_ready(workbook: str, first_setup: bool) -> None:
-    root = tk.Tk()
-    root.withdraw()
-    root.attributes('-topmost', True)
-    messagebox.showinfo(
-        'Diehl VIN is ready',
-        ('Setup complete.\n\n' if first_setup else 'Worker ready.\n\n') +
-        f'Workbook:\n{workbook}\n\n'
-        'The website is opening now. From there, use DTNA or VIN In-Service and press Start.'
-    )
-    root.destroy()
+def show_error(message: str) -> None:
+    try:
+        root = tk.Tk(); root.withdraw(); root.attributes('-topmost', True)
+        messagebox.showerror('Diehl VIN', message)
+        root.destroy()
+    except Exception:
+        pass
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument('--quick-start', action='store_true')
-    args, _ = parser.parse_known_args()
+    parser.parse_known_args()
 
     if os.name != 'nt':
-        raise RuntimeError('This initializer is for Windows.')
+        raise RuntimeError('Diehl VIN local worker is for Windows.')
 
-    print('Diehl VIN Local Worker')
-    print('One-click visible local setup. The background worker runs without a console window.')
-
-    first_setup = not VENV.exists() or not configured_workbook()
+    print('Diehl VIN v4')
     ensure_environment()
 
     workbook = configured_workbook()
     if not workbook:
         workbook = choose_workbook()
-        configure(workbook)
-    else:
-        configure(workbook)
+    save_config(workbook)
 
     start_worker()
     webbrowser.open(SITE)
-
-    if first_setup or not args.quick_start:
-        show_ready(workbook, first_setup)
 
 
 if __name__ == '__main__':
@@ -203,13 +173,5 @@ if __name__ == '__main__':
         main()
     except Exception as exc:
         print('\nERROR:', exc)
-        try:
-            root = tk.Tk()
-            root.withdraw()
-            root.attributes('-topmost', True)
-            messagebox.showerror('Diehl VIN Local Worker', str(exc))
-            root.destroy()
-        except Exception:
-            pass
-        input('\nPress Enter to close...')
+        show_error(str(exc))
         raise
