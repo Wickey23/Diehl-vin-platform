@@ -1,8 +1,8 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
-cd /d "%~dp0"
-title Diehl VIN Local Worker
 
+set "SOURCE=%~dp0"
+set "INSTALLDIR=%LocalAppData%\DiehlVINWorker"
 set "SITE=https://diehl-vin-platform.vercel.app"
 set "PYVER=3.12.10"
 set "PYURL=https://www.python.org/ftp/python/%PYVER%/python-%PYVER%-amd64.exe"
@@ -10,10 +10,31 @@ set "PYINSTALLER=%TEMP%\diehl-python-%PYVER%-amd64.exe"
 set "PYCANDIDATE=%LocalAppData%\Programs\Python\Python312\python.exe"
 set "HEALTHFILE=%TEMP%\diehl_vin_health.json"
 
+title Diehl VIN Local Worker
+
 echo ============================================================
 echo  DIEHL VIN - ONE CLICK START
 echo ============================================================
 echo.
+
+rem Install/update the worker into one permanent per-user folder.
+rem This preserves .venv, config.json, logs, browser profiles, and other local state
+rem across future downloads and updates.
+if not exist "%INSTALLDIR%" mkdir "%INSTALLDIR%"
+for %%F in (
+  "DiehlInitializer.py"
+  "server.py"
+  "configure_workbook.py"
+  "vin_lookup.py"
+  "dtna_login_and_sync.py"
+  "requirements.txt"
+  "README_LOCAL.txt"
+  "START DIEHL VIN.cmd"
+) do (
+  if exist "%SOURCE%%%~F" copy /Y "%SOURCE%%%~F" "%INSTALLDIR%\%%~F" >nul
+)
+
+cd /d "%INSTALLDIR%"
 
 rem Detect a running Diehl worker. Current v3.2 workers can be reused.
 del /q "%HEALTHFILE%" >nul 2>nul
@@ -35,26 +56,27 @@ if %errorlevel%==0 (
     timeout /t 2 /nobreak >nul
   ) else (
     echo ERROR: Port 8765 is occupied by another local program.
-    echo Close that program and run START DIEHL VIN again.
+    echo Close that program and run Diehl VIN again.
     pause
     exit /b 1
   )
 )
 
-rem Existing environment must be Python 3.11 or 3.12. Old 3.14 venvs are rebuilt.
+rem Reuse the permanent environment when it is already valid.
 if exist ".venv\Scripts\python.exe" (
   set "VENV_OK="
   for /f "delims=" %%V in ('".venv\Scripts\python.exe" -c "import sys; print('yes' if sys.version_info[:2] in [(3,11),(3,12)] else 'no')" 2^>nul') do set "VENV_OK=%%V"
   if /I "!VENV_OK!"=="yes" (
+    echo Existing Diehl Python environment found. Reusing it.
     ".venv\Scripts\python.exe" DiehlInitializer.py --quick-start
     exit /b !errorlevel!
   )
   echo Existing local environment uses an unsupported Python version.
-  echo Rebuilding it with Python 3.12...
+  echo Rebuilding it once with Python 3.12...
   rmdir /s /q ".venv"
 )
 
-echo First-time/update setup detected.
+echo First-time setup on this PC.
 echo.
 
 rem Find a compatible existing Python first.
@@ -71,7 +93,7 @@ if not defined PYEXE (
   )
 )
 
-rem No compatible Python: install the official Python.org build for this user.
+rem No compatible Python: install the official Python.org build for this user once.
 if not defined PYEXE (
   echo Python 3.11/3.12 was not found.
   echo Downloading official Python %PYVER% 64-bit...
@@ -107,7 +129,7 @@ if not defined PYEXE (
 )
 
 echo Python ready: %PYEXE%
-echo Completing Diehl VIN setup...
+echo Completing one-time Diehl VIN setup...
 echo.
 "%PYEXE%" DiehlInitializer.py
 exit /b %errorlevel%
