@@ -27,7 +27,7 @@ export default function Initializer(){
       setMessage(sd.ready?'This computer is initialized. Press Start.':'The worker is installed, but one or more required items need attention.');
     }catch{
       setWorker(null);setChecks([]);setReady(false);
-      setMessage('Diehl Initializer is not running on this computer. Run the initializer package once, then return here.');
+      setMessage('Worker not detected. Download the local worker below, extract it, and double-click START DIEHL VIN.cmd once.');
     }finally{setChecking(false)}
   }
 
@@ -43,6 +43,11 @@ export default function Initializer(){
       <div className={'readiness '+(ready?'ready':'')}>{ready?'READY':'SETUP REQUIRED'}</div>
     </section>
 
+    {!ready&&<section className="download-card">
+      <div><span className="kicker">ONE-TIME SETUP</span><h2>Download the local worker</h2><p>Download one ZIP from this website. Extract it, then double-click <b>START DIEHL VIN.cmd</b>. The launcher handles first-time setup, workbook selection, worker startup, duplicate-worker detection, and opens this site automatically.</p></div>
+      <div className="download-actions"><a className="download-primary" href="/api/download-worker">Download Local Worker</a><small>After download: Extract → double-click START DIEHL VIN.cmd</small></div>
+    </section>}
+
     <section className="connection-card">
       <div><span className="kicker">AUTOMATIC LOCAL DETECTION</span><h2>{worker?`Connected to ${worker.hostname}`:'Worker not detected'}</h2><p>{message}</p>{worker?.master_workbook&&<p><b>Active workbook:</b> {worker.master_workbook}</p>}</div>
       <div className="row"><button onClick={check} disabled={checking}>{checking?'Checking…':'Check again'}</button><button className="button-secondary" onClick={chooseWorkbook} disabled={!worker}>Change workbook</button></div>
@@ -51,13 +56,13 @@ export default function Initializer(){
     <section className="prereq-card">
       <div className="prereq-head"><div><span className="kicker">SYSTEM CHECK</span><h2>Everything needed on this PC</h2></div></div>
       <div className="check-list">
-        {checks.length?checks.map(c=><div className={'check-row '+c.status} key={c.id}><span className="check-icon">{c.status==='ok'?'✓':c.status==='warning'?'!':'×'}</span><div><b>{c.label}</b><small>{c.detail}</small></div><span className="check-state">{c.status==='ok'?'Ready':c.status==='warning'?'Check':'Missing'}</span></div>):<div className="check-empty">Run the initializer package once on this Windows computer.</div>}
+        {checks.length?checks.map(c=><div className={'check-row '+c.status} key={c.id}><span className="check-icon">{c.status==='ok'?'✓':c.status==='warning'?'!':'×'}</span><div><b>{c.label}</b><small>{c.detail}</small></div><span className="check-state">{c.status==='ok'?'Ready':c.status==='warning'?'Check':'Missing'}</span></div>):<div className="check-empty">Download the local worker above and run START DIEHL VIN.cmd once on this Windows computer.</div>}
       </div>
     </section>
 
     <section className="setup-grid">
-      <article className="setup-card featured"><div className="step-num">1</div><h2>Initialize once</h2><p>The package installs the worker, browser automation, autostart, and asks for the existing Excel workbook once.</p></article>
-      <article className="setup-card"><div className="step-num">2</div><h2>Then just press Start</h2><p>No URLs, keys, tunnels, or manual worker startup. The worker runs locally with Windows.</p></article>
+      <article className="setup-card featured"><div className="step-num">1</div><h2>Download + run once</h2><p>Download from this page, extract the ZIP, and double-click START DIEHL VIN.cmd. No command prompt typing is required.</p></article>
+      <article className="setup-card"><div className="step-num">2</div><h2>Then just press Start</h2><p>The launcher remembers the workbook and opens this site. If the worker is already running, it simply opens the website.</p></article>
       <article className="setup-card"><div className="step-num">3</div><h2>Use your own DTNA + Excel</h2><p>DTNA login/MFA and workbook stay on this computer.</p></article>
     </section>
 
