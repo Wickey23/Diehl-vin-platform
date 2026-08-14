@@ -10,16 +10,12 @@ root = tk.Tk()
 root.withdraw()
 root.attributes('-topmost', True)
 
-messagebox.showinfo(
-    'Diehl VIN Initializer',
-    'Choose the EXISTING Excel workbook this computer should use.\n\n'
-    'The worker writes into this same workbook so your data validation, formulas, tables and formatting remain in place.'
-)
 path = filedialog.askopenfilename(
     title='Choose existing VIN master workbook',
     filetypes=[('Excel workbooks', '*.xlsx *.xlsm'), ('All files', '*.*')]
 )
 if not path:
+    root.destroy()
     raise SystemExit('No workbook selected.')
 
 python = ROOT / '.venv' / 'Scripts' / 'python.exe'
@@ -31,8 +27,8 @@ CONFIG.write_text(json.dumps({
 }, indent=2), encoding='utf-8')
 
 messagebox.showinfo(
-    'Initialization complete',
-    f'Workbook selected:\n{path}\n\n'
-    'The Diehl worker will now start automatically with Windows.\n'
-    'From now on, open the website and press Start.'
+    'Workbook saved',
+    f'This computer will use:\n{path}\n\n'
+    'The selection is saved locally. Use START DIEHL VIN whenever the local worker needs to be started or restarted.'
 )
+root.destroy()
