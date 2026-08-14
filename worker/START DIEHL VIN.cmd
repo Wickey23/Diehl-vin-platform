@@ -1,10 +1,16 @@
 @echo off
-setlocal
+setlocal EnableExtensions EnableDelayedExpansion
 cd /d "%~dp0"
 title Diehl VIN Local Worker
 
+set "SITE=https://diehl-vin-platform.vercel.app"
+set "PYVER=3.12.10"
+set "PYURL=https://www.python.org/ftp/python/%PYVER%/python-%PYVER%-amd64.exe"
+set "PYINSTALLER=%TEMP%\diehl-python-%PYVER%-amd64.exe"
+set "PYCANDIDATE=%LocalAppData%\Programs\Python\Python312\python.exe"
+
 echo ============================================================
-echo  DIEHL VIN - LOCAL WORKER
+echo  DIEHL VIN - ONE CLICK START
 echo ============================================================
 echo.
 
@@ -14,33 +20,76 @@ if %errorlevel%==0 (
   findstr /I /C:"\"ok\":true" /C:"\"ok\": true" "%TEMP%\diehl_vin_health.json" >nul 2>nul
   if %errorlevel%==0 (
     echo Diehl VIN worker is already running.
-    start "" "https://diehl-vin-platform.vercel.app"
+    start "" "%SITE%"
     exit /b 0
   )
 )
 
-rem First run: locate an installed Python and let the visible initializer do setup.
-if not exist ".venv\Scripts\python.exe" (
-  echo First-time setup detected.
-  echo.
-  where py >nul 2>nul
-  if %errorlevel%==0 (
-    py DiehlInitializer.py
-    exit /b %errorlevel%
-  )
+rem If this folder is already initialized, use its own Python immediately.
+if exist ".venv\Scripts\python.exe" (
+  ".venv\Scripts\python.exe" DiehlInitializer.py --quick-start
+  exit /b %errorlevel%
+)
+
+echo First-time setup detected.
+echo.
+
+rem Find a compatible existing Python first.
+set "PYEXE="
+where py >nul 2>nul
+if %errorlevel%==0 (
+  for /f "delims=" %%P in ('py -3.12 -c "import sys; print(sys.executable)" 2^>nul') do set "PYEXE=%%P"
+)
+if not defined PYEXE (
   where python >nul 2>nul
   if %errorlevel%==0 (
-    python DiehlInitializer.py
-    exit /b %errorlevel%
+    for /f "delims=" %%P in ('python -c "import sys; print(sys.executable if sys.version_info[:2] in [(3,11),(3,12)] else '')" 2^>nul') do set "PYEXE=%%P"
   )
-  echo Python is not installed or is not available in PATH.
-  echo Please install Python 3.11 or 3.12, then double-click this file again.
+)
+
+rem No compatible Python: download the official, signed Python.org installer and install for this user.
+if not defined PYEXE (
+  echo Python 3.11/3.12 was not found.
+  echo Downloading the official Python %PYVER% 64-bit installer from python.org...
   echo.
+  del /q "%PYINSTALLER%" >nul 2>nul
+  curl.exe -fL --retry 2 --connect-timeout 20 -o "%PYINSTALLER%" "%PYURL%"
+  if errorlevel 1 (
+    echo.
+    echo ERROR: Python could not be downloaded.
+    echo Check your internet/company network connection and try again.
+    pause
+    exit /b 1
+  )
+
+  echo Installing Python for this Windows user...
+  "%PYINSTALLER%" /quiet InstallAllUsers=0 PrependPath=0 Include_launcher=1 Include_test=0 Include_doc=0 Include_tcltk=1 Include_pip=1 Shortcuts=0
+  if errorlevel 1 (
+    echo.
+    echo ERROR: Python installation did not complete successfully.
+    echo Your company security software may have blocked the official installer.
+    pause
+    exit /b 1
+  )
+  del /q "%PYINSTALLER%" >nul 2>nul
+
+  if exist "%PYCANDIDATE%" set "PYEXE=%PYCANDIDATE%"
+  if not defined PYEXE (
+    for /f "delims=" %%P in ('where /r "%LocalAppData%\Programs\Python" python.exe 2^>nul') do if not defined PYEXE set "PYEXE=%%P"
+  )
+)
+
+if not defined PYEXE (
+  echo.
+  echo ERROR: Python was installed but could not be located.
+  echo Close this window and double-click START DIEHL VIN.cmd again.
   pause
   exit /b 1
 )
 
-rem Existing setup: run the initializer in quick-start mode. It validates
-rem configuration, starts the worker only if needed, and opens the website.
-".venv\Scripts\python.exe" DiehlInitializer.py --quick-start
+echo.
+echo Python ready: %PYEXE%
+echo Completing Diehl VIN setup...
+echo.
+"%PYEXE%" DiehlInitializer.py
 exit /b %errorlevel%
