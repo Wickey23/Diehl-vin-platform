@@ -8,7 +8,7 @@ set "PYVER=3.12.10"
 set "PYURL=https://www.python.org/ftp/python/%PYVER%/python-%PYVER%-amd64.exe"
 set "PYINSTALLER=%TEMP%\diehl-python-%PYVER%-amd64.exe"
 set "PYCANDIDATE=%LocalAppData%\Programs\Python\Python312\python.exe"
-set "HEALTHFILE=%TEMP%\diehl_vin_health.json"
+set "PROBEFILE=%TEMP%\diehl_vin_probe.json"
 
 title Diehl VIN Local Worker
 
@@ -17,9 +17,7 @@ echo  DIEHL VIN - ONE CLICK START
 echo ============================================================
 echo.
 
-rem Install/update the worker into one permanent per-user folder.
-rem This preserves .venv, config.json, logs, browser profiles, and other local state
-rem across future downloads and updates.
+rem Install/update worker source into one permanent per-user folder.
 if not exist "%INSTALLDIR%" mkdir "%INSTALLDIR%"
 for %%F in (
   "DiehlInitializer.py"
@@ -36,64 +34,87 @@ for %%F in (
 
 cd /d "%INSTALLDIR%"
 
-rem Detect a running Diehl worker. Current v3.2 workers can be reused.
-del /q "%HEALTHFILE%" >nul 2>nul
-curl.exe -fsS --max-time 2 http://127.0.0.1:8765/health > "%HEALTHFILE%" 2>nul
-if %errorlevel%==0 (
-  findstr /I /C:"master_workbook" "%HEALTHFILE%" >nul 2>nul
+rem If port 8765 is active, verify it is OUR worker before stopping it.
+rem We intentionally use FastAPI's lightweight openapi endpoint here so Excel/OneDrive
+rem can never block launcher detection.
+del /q "%PROBEFILE%" >nul 2>nul
+curl.exe -fsS --max-time 2 http://127.0.0.1:8765/openapi.json > "%PROBEFILE%" 2>nul
+if !errorlevel!==0 (
+  findstr /I /C:"Diehl Local VIN Worker" "%PROBEFILE%" >nul 2>nul
   if !errorlevel!==0 (
-    findstr /I /C:"\"version\":\"3.2\"" /C:"\"version\": \"3.2\"" "%HEALTHFILE%" >nul 2>nul
-    if !errorlevel!==0 (
-      echo Diehl VIN worker v3.2 is already running.
-      start "" "%SITE%"
-      exit /b 0
-    )
-
-    echo An older Diehl VIN worker is running. Updating it automatically...
+    echo Existing Diehl worker found. Restarting it with the latest local files...
     for /f "tokens=5" %%P in ('netstat -ano ^| findstr /R /C:"127.0.0.1:8765 .*LISTENING"') do (
       taskkill /PID %%P /F >nul 2>nul
     )
-    timeout /t 2 /nobreak >nul
+    for /L %%W in (1,1,20) do (
+      netstat -ano | findstr /R /C:"127.0.0.1:8765 .*LISTENING" >nul 2>nul
+      if errorlevel 1 goto worker_stopped
+      timeout /t 1 /nobreak >nul
+    )
+    echo ERROR: The previous Diehl worker did not close cleanly.
+    echo Close this window, restart Windows once, then press START DIEHL VIN again.
+    pause
+    exit /b 1
   ) else (
-    echo ERROR: Port 8765 is occupied by another local program.
-    echo Close that program and run Diehl VIN again.
+    echo ERROR: Port 8765 belongs to another local program.
+    echo The launcher will not terminate an unknown process.
     pause
     exit /b 1
   )
 )
 
-rem Reuse the permanent environment when it is already valid.
-if exist ".venv\Scripts\python.exe" (
-  set "VENV_OK="
-  for /f "delims=" %%V in ('".venv\Scripts\python.exe" -c "import sys; print('yes' if sys.version_info[:2] in [(3,11),(3,12)] else 'no')" 2^>nul') do set "VENV_OK=%%V"
-  if /I "!VENV_OK!"=="yes" (
-    echo Existing Diehl Python environment found. Reusing it.
-    ".venv\Scripts\python.exe" DiehlInitializer.py --quick-start
-    exit /b !errorlevel!
-  )
-  echo Existing local environment uses an unsupported Python version.
-  echo Rebuilding it once with Python 3.12...
-  rmdir /s /q ".venv"
+:worker_stopped
+
+rem Validate the permanent venv WITHOUT executing its python.exe.
+rem Running python.exe was the old bug: Windows could lock its DLLs while the worker
+rem was alive, causing a false "unsupported Python" result and a partial deletion.
+set "VENV_OK="
+if exist ".venv\Scripts\python.exe" if exist ".venv\pyvenv.cfg" (
+  findstr /I /C:"version = 3.12" /C:"version = 3.11" ".venv\pyvenv.cfg" >nul 2>nul
+  if !errorlevel!==0 set "VENV_OK=yes"
 )
 
-echo First-time setup on this PC.
+if /I "!VENV_OK!"=="yes" (
+  echo Existing Diehl Python environment found. Reusing it.
+  ".venv\Scripts\python.exe" DiehlInitializer.py --quick-start
+  exit /b !errorlevel!
+)
+
+rem Missing pyvenv.cfg or missing python.exe means a prior interrupted delete left
+rem a corrupt environment. It is safe to remove now because the Diehl worker above
+rem has already been stopped.
+if exist ".venv" (
+  echo Repairing incomplete local Python environment...
+  rmdir /s /q ".venv" 2>nul
+  if exist ".venv" (
+    echo ERROR: Windows still has files locked inside the old Diehl environment.
+    echo Restart Windows once, then press START DIEHL VIN again.
+    pause
+    exit /b 1
+  )
+)
+
+echo First-time environment setup on this PC.
 echo.
 
 rem Find a compatible existing Python first.
 set "PYEXE="
 where py >nul 2>nul
-if %errorlevel%==0 (
+if !errorlevel!==0 (
   for /f "delims=" %%P in ('py -3.12 -c "import sys; print(sys.executable)" 2^>nul') do set "PYEXE=%%P"
   if not defined PYEXE for /f "delims=" %%P in ('py -3.11 -c "import sys; print(sys.executable)" 2^>nul') do set "PYEXE=%%P"
 )
 if not defined PYEXE (
+  if exist "%PYCANDIDATE%" set "PYEXE=%PYCANDIDATE%"
+)
+if not defined PYEXE (
   where python >nul 2>nul
-  if %errorlevel%==0 (
+  if !errorlevel!==0 (
     for /f "delims=" %%P in ('python -c "import sys; print(sys.executable if sys.version_info[:2] in [(3,11),(3,12)] else '')" 2^>nul') do set "PYEXE=%%P"
   )
 )
 
-rem No compatible Python: install the official Python.org build for this user once.
+rem No compatible Python: install the official Python.org build once for this user.
 if not defined PYEXE (
   echo Python 3.11/3.12 was not found.
   echo Downloading official Python %PYVER% 64-bit...
@@ -115,21 +136,17 @@ if not defined PYEXE (
     exit /b 1
   )
   del /q "%PYINSTALLER%" >nul 2>nul
-
   if exist "%PYCANDIDATE%" set "PYEXE=%PYCANDIDATE%"
-  if not defined PYEXE (
-    for /f "delims=" %%P in ('where /r "%LocalAppData%\Programs\Python" python.exe 2^>nul') do if not defined PYEXE set "PYEXE=%%P"
-  )
 )
 
 if not defined PYEXE (
-  echo ERROR: Python could not be located after setup.
+  echo ERROR: Python 3.11/3.12 could not be located after setup.
   pause
   exit /b 1
 )
 
 echo Python ready: %PYEXE%
-echo Completing one-time Diehl VIN setup...
+echo Creating the Diehl environment once...
 echo.
 "%PYEXE%" DiehlInitializer.py
 exit /b %errorlevel%
