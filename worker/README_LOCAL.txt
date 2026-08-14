@@ -30,3 +30,6 @@ The selected workbook remains the source file. VIN writes use desktop Excel COM 
 
 DTNA
 DTNA browser/login/MFA remain local to this computer. The persistent browser profile is stored locally.
+
+BUILD
+Safe local-worker package revision 1.
