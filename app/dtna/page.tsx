@@ -1,2 +1,52 @@
-'use client';import {useEffect,useState} from 'react';
-export default function DtnaPage(){const[w,setW]=useState<any>(null);const[online,setOnline]=useState(false);const[msg,setMsg]=useState('Waiting for Windows worker.');const[commands,setCommands]=useState<any[]>([]);async function refresh(){const h=await fetch('/api/worker/heartbeat').then(r=>r.json());setW(h.worker);setOnline(!!h.online);const c=await fetch('/api/dtna/command').then(r=>r.json());setCommands(c.commands||[])}useEffect(()=>{refresh();const t=setInterval(refresh,3000);return()=>clearInterval(t)},[]);async function send(command:string){setMsg('Queued for Windows worker…');const r=await fetch('/api/dtna/command',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({command})});const d=await r.json();setMsg(r.ok?'Command queued. The local DTNA browser will open on the worker computer.':d.error||'Failed');refresh()}return <main className="dtna-page"><section className="dtna-hero"><div><span className="kicker">FREIGHTLINER / DTNA</span><h1>DTNA Sales Order + AUTO VIN</h1><p>Commands are queued in Vercel and claimed by the Windows worker. DTNA authentication, MFA and browser profiles remain local.</p></div><div className={'dtna-live '+(online?'running':'')}>{online?'● Worker online':'○ Worker offline'}</div></section><section className="dtna-actions"><button onClick={()=>send('dtna_open')} disabled={!online}>Open / Login to DTNA</button><button className="primary-action" onClick={()=>send('dtna_sync')} disabled={!online}>Run Sales Order + AUTO VIN Sync</button><button onClick={refresh}>Refresh</button></section><div className="dtna-message">{msg}</div><section className="dtna-grid"><article className="dtna-card"><h2>Active worker</h2><dl><dt>Computer</dt><dd>{w?.hostname||'—'}</dd><dt>Workbook</dt><dd>{w?.master_workbook||'—'}</dd><dt>DTNA status</dt><dd>{w?.dtna_status||'—'}</dd><dt>Last heartbeat</dt><dd>{w?.last_seen||'—'}</dd></dl></article><article className="dtna-card"><h2>Recent commands</h2>{commands.length?commands.map(c=><p key={c.id}><b>{c.command}</b> — {c.status}{c.error_message?` · ${c.error_message}`:''}</p>):<p>No DTNA commands yet.</p>}</article></section></main>}
+'use client';
+
+import {useEffect,useState} from 'react';
+
+const LOCAL='http://127.0.0.1:8765';
+
+export default function DtnaPage(){
+  const [worker,setWorker]=useState<any>(null);
+  const [status,setStatus]=useState<any>(null);
+  const [online,setOnline]=useState(false);
+  const [msg,setMsg]=useState('Checking this computer…');
+
+  async function local(path:string,init:RequestInit={}){
+    const r=await fetch(LOCAL+path,{...init,cache:'no-store',headers:{'content-type':'application/json',...(init.headers||{})}});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(d.detail||d.error||'Local worker request failed');
+    return d;
+  }
+
+  async function refresh(){
+    try{
+      const h=await local('/health');
+      const s=await local('/dtna/status');
+      setWorker(h.worker||null);setStatus(s);setOnline(true);setMsg('DTNA worker is ready on this computer.');
+    }catch{
+      setWorker(null);setStatus(null);setOnline(false);setMsg('Run the Diehl initializer once on this Windows computer.');
+    }
+  }
+
+  useEffect(()=>{refresh();const t=setInterval(refresh,4000);return()=>clearInterval(t)},[]);
+
+  async function run(path:string,success:string){
+    try{setMsg('Starting locally…');await local(path,{method:'POST'});setMsg(success);setTimeout(refresh,1200)}catch(e:any){setMsg(e.message)}
+  }
+
+  return <main className="dtna-page">
+    <section className="dtna-hero">
+      <div><span className="kicker">FREIGHTLINER / DTNA</span><h1>DTNA Sales Order + AUTO VIN</h1><p>The browser, login/MFA, profile, and Excel files stay on this Windows computer. The website only tells the local worker what to start.</p></div>
+      <div className={'dtna-live '+(online?'running':'')}>{online?'● This computer ready':'○ Initializer required'}</div>
+    </section>
+    <section className="dtna-actions">
+      <button onClick={()=>run('/dtna/open','DTNA login browser opened locally.')} disabled={!online}>Open / Login to DTNA</button>
+      <button className="primary-action" onClick={()=>run('/dtna/sync','Sales Order + AUTO VIN sync started locally.')} disabled={!online}>Start DTNA Sync</button>
+      <button onClick={refresh}>Refresh</button>
+    </section>
+    <div className="dtna-message">{msg}</div>
+    <section className="dtna-grid">
+      <article className="dtna-card"><h2>This computer</h2><dl><dt>Computer</dt><dd>{worker?.hostname||'—'}</dd><dt>Workbook</dt><dd>{worker?.master_workbook||'—'}</dd><dt>DTNA status</dt><dd>{worker?.dtna_status||'—'}</dd><dt>Persistent profile</dt><dd>{status?.profile||'—'}</dd></dl></article>
+      <article className="dtna-card"><h2>How it works</h2><p>Initialize this computer once. After that, pressing Start here launches the local DTNA automation using the saved browser profile. If DTNA requests MFA, finish it in the browser window; the profile remains local for future runs.</p></article>
+    </section>
+  </main>
+}

@@ -1,5 +1,8 @@
+fastapi==0.116.1
+uvicorn[standard]==0.35.0
 openpyxl==3.1.5
 pandas>=2.2,<3
 playwright>=1.49,<2
 requests>=2.32,<3
 pywin32>=306
+psutil>=7,<8
