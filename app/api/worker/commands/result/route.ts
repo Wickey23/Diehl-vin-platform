@@ -1,0 +1,3 @@
+import { NextResponse } from 'next/server';import { adminDb } from '../../../../../lib/supabase-admin';
+function ok(req:Request){const s=process.env.DTNA_WORKER_SECRET;return !!s&&req.headers.get('x-worker-secret')===s}
+export async function POST(req:Request){if(!ok(req))return NextResponse.json({error:'Unauthorized'},{status:401});try{const b=await req.json();const db=adminDb();const {error}=await db.from('worker_commands').update({status:b.status==='complete'?'complete':'error',result:b.result||{},error_message:b.error||null,completed_at:new Date().toISOString()}).eq('id',b.id);if(error)throw error;return NextResponse.json({ok:true})}catch(e){return NextResponse.json({error:e instanceof Error?e.message:'Command result failed'},{status:500})}}
