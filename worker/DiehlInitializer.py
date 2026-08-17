@@ -67,19 +67,13 @@ def import_check(py: Path) -> bool:
 def repair_pywin32(py: Path) -> None:
     print('      Repairing Windows Excel integration (pywin32)...')
     run([str(py), '-m', 'pip', 'install', '--upgrade', '--force-reinstall', '--no-cache-dir', 'pywin32>=306'], 'Reinstalling pywin32')
-
-    # Some Windows/venv combinations need the pywin32 post-install registration/copy step.
     post = VENV / 'Scripts' / 'pywin32_postinstall.py'
     if post.exists():
         result = subprocess.run([str(py), str(post), '-install'], cwd=str(ROOT), check=False)
         if result.returncode != 0:
             print('      pywin32 post-install returned a warning; verifying imports directly...')
-
     if not import_check(py):
-        raise RuntimeError(
-            'Windows Excel integration could not be initialized. '
-            'pywin32 was reinstalled, but pythoncom/win32com still cannot load.'
-        )
+        raise RuntimeError('Windows Excel integration could not be initialized. pywin32 was reinstalled, but pythoncom/win32com still cannot load.')
 
 
 def ensure_environment() -> None:
@@ -124,6 +118,7 @@ def save_config(workbook: Path) -> None:
 def resolve_shared_workbook() -> Path:
     cached = load_cached_path(CONFIG)
     print('[4/5] Finding shared workbook and organizing sheets...')
+    print(f'      Runtime Python: {sys.executable}')
     print(f'      Locating shared workbook: {WORKBOOK_NAME}')
     workbook = find_shared_workbook(cached)
     print(f'      Found: {workbook}')
@@ -148,11 +143,9 @@ def ping_worker(timeout: float = 1.0) -> dict | None:
 def start_worker() -> None:
     if not SERVICE.exists():
         raise RuntimeError('service_v4.py is missing. Download a fresh Local Worker package.')
-
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     log_handle = WORKER_LOG.open('a', encoding='utf-8', buffering=1)
     log_handle.write(f'\n[{time.strftime("%Y-%m-%d %H:%M:%S")}] Starting Diehl VIN Worker v4\n')
-
     proc = subprocess.Popen(
         [str(venv_python()), str(SERVICE)],
         cwd=str(ROOT),
@@ -160,7 +153,6 @@ def start_worker() -> None:
         stdout=log_handle,
         stderr=subprocess.STDOUT,
     )
-
     deadline = time.time() + 15
     while time.time() < deadline:
         if proc.poll() is not None:
@@ -172,7 +164,6 @@ def start_worker() -> None:
             print('      Local worker connected on 127.0.0.1:8765.')
             return
         time.sleep(.25)
-
     try:
         proc.terminate()
     except Exception:
@@ -192,13 +183,29 @@ def show_error(message: str) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(add_help=False)
-    parser.add_argument('--quick-start', action='store_true')
-    parser.parse_known_args()
+    parser.add_argument('--inside-venv', action='store_true')
+    args, _ = parser.parse_known_args()
 
     if os.name != 'nt':
         raise RuntimeError('Diehl VIN local worker is for Windows.')
 
-    ensure_environment()
+    if not args.inside_venv:
+        ensure_environment()
+        py = venv_python()
+        print('      Switching initialization to verified venv Python...')
+        print(f'      Venv Python: {py}')
+        result = subprocess.run([str(py), str(Path(__file__).resolve()), '--inside-venv'], cwd=str(ROOT))
+        raise SystemExit(result.returncode)
+
+    # From this point onward every COM/Excel import runs in the verified venv.
+    current = Path(sys.executable).resolve()
+    expected = venv_python().resolve()
+    if os.path.normcase(str(current)) != os.path.normcase(str(expected)):
+        raise RuntimeError(f'Initializer is using the wrong Python runtime: {current}. Expected: {expected}')
+
+    if not import_check(current):
+        raise RuntimeError('Verified venv dependencies are no longer available.')
+
     resolve_shared_workbook()
     print('      Starting local worker...')
     start_worker()
@@ -208,6 +215,8 @@ def main() -> None:
 if __name__ == '__main__':
     try:
         main()
+    except SystemExit:
+        raise
     except Exception as exc:
         print('\nERROR:', exc)
         show_error(str(exc))
