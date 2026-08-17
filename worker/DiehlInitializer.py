@@ -42,6 +42,46 @@ def requirements_hash() -> str:
     return hashlib.sha256(REQUIREMENTS.read_bytes()).hexdigest() if REQUIREMENTS.exists() else ''
 
 
+def import_check(py: Path) -> bool:
+    code = (
+        'import fastapi, uvicorn, openpyxl, psutil; '
+        'import pythoncom; '
+        'import win32com.client; '
+        'print("dependency-check-ok")'
+    )
+    result = subprocess.run(
+        [str(py), '-c', code],
+        cwd=str(ROOT),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    if result.returncode == 0:
+        return True
+    print('      Dependency verification failed:')
+    for line in (result.stdout or '').splitlines()[-8:]:
+        print(f'        {line}')
+    return False
+
+
+def repair_pywin32(py: Path) -> None:
+    print('      Repairing Windows Excel integration (pywin32)...')
+    run([str(py), '-m', 'pip', 'install', '--upgrade', '--force-reinstall', '--no-cache-dir', 'pywin32>=306'], 'Reinstalling pywin32')
+
+    # Some Windows/venv combinations need the pywin32 post-install registration/copy step.
+    post = VENV / 'Scripts' / 'pywin32_postinstall.py'
+    if post.exists():
+        result = subprocess.run([str(py), str(post), '-install'], cwd=str(ROOT), check=False)
+        if result.returncode != 0:
+            print('      pywin32 post-install returned a warning; verifying imports directly...')
+
+    if not import_check(py):
+        raise RuntimeError(
+            'Windows Excel integration could not be initialized. '
+            'pywin32 was reinstalled, but pythoncom/win32com still cannot load.'
+        )
+
+
 def ensure_environment() -> None:
     print('[3/5] Preparing local Python environment...')
     py = venv_python()
@@ -53,11 +93,21 @@ def ensure_environment() -> None:
     marker = VENV / '.diehl_requirements_hash'
     expected = requirements_hash()
     current = marker.read_text(encoding='utf-8').strip() if marker.exists() else ''
+
     if current != expected:
-        run([str(py), '-m', 'pip', 'install', '-r', str(REQUIREMENTS)], 'Installing/updating required packages')
-        marker.write_text(expected, encoding='utf-8')
+        run([str(py), '-m', 'pip', 'install', '--upgrade', '-r', str(REQUIREMENTS)], 'Installing/updating required packages')
     else:
-        print('      Required packages already installed.')
+        print('      Requirements marker is current. Verifying installed modules...')
+
+    if not import_check(py):
+        print('      Installed environment is incomplete. Repairing dependencies...')
+        run([str(py), '-m', 'pip', 'install', '--upgrade', '--force-reinstall', '--no-cache-dir', '-r', str(REQUIREMENTS)], 'Repairing required packages')
+
+    if not import_check(py):
+        repair_pywin32(py)
+
+    marker.write_text(expected, encoding='utf-8')
+    print('      Environment verified.')
 
 
 def save_config(workbook: Path) -> None:
