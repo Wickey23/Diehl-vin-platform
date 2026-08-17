@@ -2,48 +2,59 @@ from __future__ import annotations
 
 import os
 import socket
-import sys
 import time
 from pathlib import Path
 
 import psutil
 
 CURRENT_PID = os.getpid()
-CURRENT_PARENT = os.getppid()
 LOCALAPPDATA = Path(os.environ.get('LOCALAPPDATA', ''))
 KNOWN_ROOTS = [
     str(LOCALAPPDATA / 'DiehlVINWorker').lower(),
     str(LOCALAPPDATA / 'DiehlDTNAManual').lower(),
-    str(Path.home() / 'Downloads' / 'Diehl_VIN_Local_Worker').lower(),
-    str(Path.home() / 'Downloads' / 'Diehl_VIN_Local_Worker_v4').lower(),
-    str(Path.home() / 'Downloads' / 'Diehl_VIN_Local_Worker_v4_1').lower(),
 ]
-KNOWN_MARKERS = (
+
+# Only Python worker/automation scripts are cleanup targets.
+# Launchers, CMD/BAT files, Explorer, Edge, and unrelated Python processes are never targets.
+PYTHON_MARKERS = (
     'server.py',
     'service_v4.py',
-    'diehlinitializer.py',
     'vin_lookup.py',
     'dtna_login_and_sync.py',
-    'start diehl vin.cmd',
-    'start_worker.cmd',
-    'install_and_start.bat',
-    'setup_and_run.bat',
-    'install_autostart.bat',
 )
 
 
-def is_known_diehl_process(proc: psutil.Process) -> bool:
-    if proc.pid in {CURRENT_PID, CURRENT_PARENT}:
+def ancestor_pids() -> set[int]:
+    out = {CURRENT_PID}
+    try:
+        proc = psutil.Process(CURRENT_PID)
+        for parent in proc.parents():
+            out.add(parent.pid)
+    except Exception:
+        pass
+    return out
+
+
+PROTECTED_PIDS = ancestor_pids()
+
+
+def is_known_diehl_python(proc: psutil.Process) -> bool:
+    if proc.pid in PROTECTED_PIDS:
         return False
     try:
+        name = (proc.name() or '').lower()
         cmd = ' '.join(proc.cmdline()).lower()
         exe = (proc.exe() or '').lower()
         cwd = (proc.cwd() or '').lower()
     except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
         return False
 
+    # Never terminate non-Python processes from this cleaner.
+    if 'python' not in name and 'python' not in exe:
+        return False
+
     text = ' '.join((cmd, exe, cwd))
-    marker_match = any(marker in text for marker in KNOWN_MARKERS)
+    marker_match = any(marker in cmd for marker in PYTHON_MARKERS)
     root_match = any(root and root in text for root in KNOWN_ROOTS)
     return marker_match and root_match
 
@@ -64,26 +75,27 @@ def cleanup() -> int:
 
     for proc in psutil.process_iter(['pid', 'name']):
         try:
-            if is_known_diehl_process(proc):
+            if is_known_diehl_python(proc):
                 candidates[proc.pid] = proc
         except Exception:
             pass
 
+    # Port 8765 is only cleaned when the listener is also a verified Diehl Python process.
     for pid in pids_listening_on_8765():
-        if pid in {CURRENT_PID, CURRENT_PARENT}:
+        if pid in PROTECTED_PIDS:
             continue
         try:
             proc = psutil.Process(pid)
-            if is_known_diehl_process(proc):
+            if is_known_diehl_python(proc):
                 candidates[pid] = proc
         except Exception:
             pass
 
     if not candidates:
-        print('No stale Diehl processes found.')
+        print('No stale Diehl worker processes found.')
         return 0
 
-    print(f'Cleaning up {len(candidates)} stale Diehl process(es)...')
+    print(f'Cleaning up {len(candidates)} stale Diehl worker process(es)...')
     for proc in candidates.values():
         try:
             print(f'  stopping PID {proc.pid}: {proc.name()}')
@@ -91,7 +103,7 @@ def cleanup() -> int:
         except Exception:
             pass
 
-    gone, alive = psutil.wait_procs(list(candidates.values()), timeout=3)
+    _, alive = psutil.wait_procs(list(candidates.values()), timeout=3)
     for proc in alive:
         try:
             print(f'  force stopping PID {proc.pid}: {proc.name()}')
