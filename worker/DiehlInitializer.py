@@ -11,7 +11,10 @@ import urllib.request
 import webbrowser
 from pathlib import Path
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import messagebox
+
+from shared_workbook import find_shared_workbook, load_cached_path, WORKBOOK_NAME
+from workbook_organizer import organize_workbook
 
 ROOT = Path(__file__).resolve().parent
 VENV = ROOT / '.venv'
@@ -30,7 +33,7 @@ def venv_python() -> Path:
 
 
 def run(args: list[str], label: str) -> None:
-    print(label + '...')
+    print(f'      {label}...')
     result = subprocess.run(args, cwd=str(ROOT))
     if result.returncode != 0:
         raise RuntimeError(f'{label} failed with exit code {result.returncode}.')
@@ -41,6 +44,7 @@ def requirements_hash() -> str:
 
 
 def ensure_environment() -> None:
+    print('[3/5] Preparing local Python environment...')
     py = venv_python()
     if not py.exists():
         run([sys.executable, '-m', 'venv', str(VENV)], 'Creating local Python environment')
@@ -53,47 +57,39 @@ def ensure_environment() -> None:
     if current != expected:
         run([str(py), '-m', 'pip', 'install', '-r', str(REQUIREMENTS)], 'Installing/updating required packages')
         marker.write_text(expected, encoding='utf-8')
+    else:
+        print('      Required packages already installed.')
 
 
 def cleanup_old_processes() -> None:
-    if not CLEANUP.exists():
-        return
-    result = subprocess.run([str(venv_python()), str(CLEANUP)], cwd=str(ROOT), check=False)
-    if result.returncode != 0:
-        raise RuntimeError('Could not safely clean up an older Diehl worker process.')
+    print('[4/5] Cleaning old Diehl processes and preparing shared workbook...')
+    if CLEANUP.exists():
+        result = subprocess.run([str(venv_python()), str(CLEANUP)], cwd=str(ROOT), check=False)
+        if result.returncode != 0:
+            raise RuntimeError('Could not safely clean up an older Diehl worker process.')
 
 
-def read_config() -> dict:
-    try:
-        return json.loads(CONFIG.read_text(encoding='utf-8')) if CONFIG.exists() else {}
-    except Exception:
-        return {}
-
-
-def configured_workbook() -> str:
-    path = str(read_config().get('masterWorkbook') or '').strip()
-    return path if path and Path(path).exists() else ''
-
-
-def choose_workbook() -> str:
-    root = tk.Tk(); root.withdraw(); root.attributes('-topmost', True)
-    path = filedialog.askopenfilename(
-        title='Choose existing VIN master workbook',
-        filetypes=[('Excel workbooks', '*.xlsx *.xlsm'), ('All files', '*.*')]
-    )
-    root.destroy()
-    if not path:
-        raise RuntimeError('No workbook was selected.')
-    return path
-
-
-def save_config(workbook: str) -> None:
+def save_config(workbook: Path) -> None:
     py = venv_python()
     CONFIG.write_text(json.dumps({
-        'masterWorkbook': workbook,
+        'masterWorkbook': str(workbook),
+        'workbookName': WORKBOOK_NAME,
+        'workbookMode': 'shared-onedrive',
         'vinLookupCommand': f'"{py}" "{ROOT / "vin_lookup.py"}"',
         'port': 8765,
     }, indent=2), encoding='utf-8')
+
+
+def resolve_shared_workbook() -> Path:
+    cached = load_cached_path(CONFIG)
+    print(f'      Locating shared workbook: {WORKBOOK_NAME}')
+    workbook = find_shared_workbook(cached)
+    print(f'      Found: {workbook}')
+    print('      Organizing workbook sheets: VIN In-Service + DTNA...')
+    organize_workbook(workbook)
+    save_config(workbook)
+    print('      Shared workbook ready.')
+    return workbook
 
 
 def ping_worker(timeout: float = 1.0) -> dict | None:
@@ -123,7 +119,7 @@ def start_worker() -> None:
         stderr=subprocess.STDOUT,
     )
 
-    deadline = time.time() + 10
+    deadline = time.time() + 15
     while time.time() < deadline:
         if proc.poll() is not None:
             log_handle.close()
@@ -131,7 +127,7 @@ def start_worker() -> None:
         info = ping_worker(.5)
         if info and str(info.get('version')) == '4.0':
             log_handle.close()
-            print('Diehl VIN worker v4 is ready.')
+            print('      Local worker connected on 127.0.0.1:8765.')
             return
         time.sleep(.25)
 
@@ -160,15 +156,10 @@ def main() -> None:
     if os.name != 'nt':
         raise RuntimeError('Diehl VIN local worker is for Windows.')
 
-    print('Diehl VIN v4')
     ensure_environment()
     cleanup_old_processes()
-
-    workbook = configured_workbook()
-    if not workbook:
-        workbook = choose_workbook()
-    save_config(workbook)
-
+    resolve_shared_workbook()
+    print('      Starting local worker...')
     start_worker()
     webbrowser.open(SITE)
 
@@ -179,4 +170,4 @@ if __name__ == '__main__':
     except Exception as exc:
         print('\nERROR:', exc)
         show_error(str(exc))
-        raise
+        raise SystemExit(1)
