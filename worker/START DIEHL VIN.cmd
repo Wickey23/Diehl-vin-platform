@@ -19,10 +19,11 @@ echo.
 
 if not exist "%INSTALLDIR%" mkdir "%INSTALLDIR%"
 
-rem Copy only v4 program files. Never touch the old .venv.
+rem Copy only supported v4 files. Older environments remain isolated.
 for %%F in (
   "DiehlInitializer.py"
   "service_v4.py"
+  "cleanup_old_diehl.py"
   "configure_workbook.py"
   "vin_lookup.py"
   "dtna_login_and_sync.py"
@@ -73,7 +74,7 @@ exit /b 1
 
 :worker_stopped
 
-rem Require Python 3.12 specifically. Do not use Python 3.14 from PATH.
+rem Require Python 3.12 specifically. Never use Python 3.14 from PATH.
 set "PYEXE="
 if exist "%PY312%" set "PYEXE=%PY312%"
 if not defined PYEXE (
