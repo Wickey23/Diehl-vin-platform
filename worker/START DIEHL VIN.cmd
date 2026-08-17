@@ -12,7 +12,7 @@ set "PY312=%LocalAppData%\Programs\Python\Python312\python.exe"
 title Diehl VIN - Setup and Start
 color 0F
 echo ============================================================
-echo  DIEHL VIN - SETUP AND START v4.4
+echo  DIEHL VIN - SETUP AND START v4.5
 echo ============================================================
 echo.
 echo This launcher installs/updates the worker into:
@@ -28,8 +28,6 @@ if errorlevel 1 goto :fail_install
 call :download "DiehlInitializer.py"
 if errorlevel 1 goto :fail_download
 call :download "service_v4.py"
-if errorlevel 1 goto :fail_download
-call :download "cleanup_old_diehl.py"
 if errorlevel 1 goto :fail_download
 call :download "shared_workbook.py"
 if errorlevel 1 goto :fail_download
@@ -70,7 +68,7 @@ if not defined PYEXE goto :fail_python_missing
 echo       Python ready: %PYEXE%
 echo.
 
-echo [3/5] Initializing local environment and cleaning old Diehl processes...
+echo [3/5] Preparing local environment...
 echo [4/5] Finding shared OneDrive workbook, organizing sheets, and starting worker...
 echo.
 cd /d "%INSTALLDIR%"
