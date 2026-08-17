@@ -25,7 +25,6 @@ PING = 'http://127.0.0.1:8765/ping'
 LOG_DIR = ROOT / 'logs'
 WORKER_LOG = LOG_DIR / 'worker.log'
 SERVICE = ROOT / 'service_v4.py'
-CLEANUP = ROOT / 'cleanup_old_diehl.py'
 
 
 def venv_python() -> Path:
@@ -61,14 +60,6 @@ def ensure_environment() -> None:
         print('      Required packages already installed.')
 
 
-def cleanup_old_processes() -> None:
-    print('[4/5] Cleaning old Diehl processes and preparing shared workbook...')
-    if CLEANUP.exists():
-        result = subprocess.run([str(venv_python()), str(CLEANUP)], cwd=str(ROOT), check=False)
-        if result.returncode != 0:
-            raise RuntimeError('Could not safely clean up an older Diehl worker process.')
-
-
 def save_config(workbook: Path) -> None:
     py = venv_python()
     CONFIG.write_text(json.dumps({
@@ -82,6 +73,7 @@ def save_config(workbook: Path) -> None:
 
 def resolve_shared_workbook() -> Path:
     cached = load_cached_path(CONFIG)
+    print('[4/5] Finding shared workbook and organizing sheets...')
     print(f'      Locating shared workbook: {WORKBOOK_NAME}')
     workbook = find_shared_workbook(cached)
     print(f'      Found: {workbook}')
@@ -157,7 +149,6 @@ def main() -> None:
         raise RuntimeError('Diehl VIN local worker is for Windows.')
 
     ensure_environment()
-    cleanup_old_processes()
     resolve_shared_workbook()
     print('      Starting local worker...')
     start_worker()
