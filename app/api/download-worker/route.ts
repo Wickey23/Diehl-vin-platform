@@ -6,7 +6,7 @@ export const revalidate = 0;
 
 const REPO = 'Wickey23/Diehl-vin-platform';
 const BRANCH = 'main';
-const PACKAGE_VERSION = '4.3';
+const PACKAGE_VERSION = '4.4';
 const FILES = [
   'worker/START DIEHL VIN.cmd',
   'worker/DiehlInitializer.py',
@@ -30,13 +30,13 @@ async function fetchText(path: string) {
   });
   if (!response.ok) throw new Error(`Could not fetch ${path} (${response.status})`);
   const text = await response.text();
-  if (path.endsWith('START DIEHL VIN.cmd') && !text.includes('SETUP AND START v4.3')) {
+  if (path.endsWith('START DIEHL VIN.cmd') && !text.includes('SETUP AND START v4.4')) {
     throw new Error('GitHub returned a stale launcher. Please try the download again.');
   }
   if (path.endsWith('shared_workbook.py') && !text.includes('DIEHL-VIN-PLATFORM WORKBOOK.xlsx')) {
     throw new Error('Shared workbook discovery module is stale or incomplete.');
   }
-  if (path.endsWith('workbook_organizer.py') && !text.includes("VIN_SHEET = 'VIN In-Service'")) {
+  if (path.endsWith('workbook_organizer.py') && !text.includes("VIN_SHEET = 'VIN In-Service'") && !text.includes("DTNA_SHEET = 'DTNA'")) {
     throw new Error('Workbook organizer is stale or incomplete.');
   }
   return text;
@@ -45,7 +45,7 @@ async function fetchText(path: string) {
 export async function GET() {
   try {
     const zip = new JSZip();
-    const folder = zip.folder('Diehl_VIN_Local_Worker_v4_3');
+    const folder = zip.folder('Diehl_VIN_Local_Worker_v4_4');
     if (!folder) throw new Error('Could not create ZIP folder.');
 
     const fetched = await Promise.all(FILES.map(async (path) => ({path, text: await fetchText(path)})));
@@ -53,12 +53,13 @@ export async function GET() {
 
     folder.file('PACKAGE VERSION.txt', [
       `Diehl VIN Local Worker ${PACKAGE_VERSION}`,
-      'Expected launcher banner: DIEHL VIN - SETUP AND START v4.3',
+      'Expected launcher banner: DIEHL VIN - SETUP AND START v4.4',
       'Permanent runtime: %LocalAppData%\\DiehlVINWorker\\v4',
       'Python runtime: 3.12',
       'Shared workbook: DIEHL-VIN-PLATFORM WORKBOOK.xlsx',
       'Workbook sheets: VIN In-Service and DTNA',
-      'Startup stays visible on failure and shows the failed step.',
+      'Launcher self-bootstraps current worker files and does not depend on ZIP-relative files.',
+      'Each Windows user initializes their own DTNA login/MFA locally.',
       `Generated: ${new Date().toISOString()}`,
     ].join('\r\n'));
 
@@ -67,11 +68,11 @@ export async function GET() {
       '',
       '1. Extract this ZIP.',
       '2. Double-click START DIEHL VIN.cmd.',
-      '3. The banner must say DIEHL VIN - SETUP AND START v4.3.',
-      '4. Leave the setup window open while it completes the numbered steps.',
+      '3. The banner must say DIEHL VIN - SETUP AND START v4.4.',
+      '4. START downloads/verifies the current supported worker files into LocalAppData.',
       '5. The worker automatically locates DIEHL-VIN-PLATFORM WORKBOOK.xlsx in synced OneDrive.',
       '6. The workbook is organized into VIN In-Service and DTNA sheets.',
-      '7. The local worker is verified before the website opens.',
+      '7. After the worker connects, initialize YOUR DTNA login from the site and complete your own MFA.',
       '',
       'If setup fails, the window remains open and displays the exact failing step.',
     ].join('\r\n'));
@@ -81,7 +82,7 @@ export async function GET() {
       status: 200,
       headers: {
         'Content-Type': 'application/zip',
-        'Content-Disposition': 'attachment; filename="Diehl_VIN_Local_Worker_v4_3.zip"',
+        'Content-Disposition': 'attachment; filename="Diehl_VIN_Local_Worker_v4_4.zip"',
         'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
         'Pragma': 'no-cache',
         'Expires': '0',
