@@ -22,6 +22,7 @@ PING = 'http://127.0.0.1:8765/ping'
 LOG_DIR = ROOT / 'logs'
 WORKER_LOG = LOG_DIR / 'worker.log'
 SERVICE = ROOT / 'service_v4.py'
+CLEANUP = ROOT / 'cleanup_old_diehl.py'
 
 
 def venv_python() -> Path:
@@ -52,6 +53,14 @@ def ensure_environment() -> None:
     if current != expected:
         run([str(py), '-m', 'pip', 'install', '-r', str(REQUIREMENTS)], 'Installing/updating required packages')
         marker.write_text(expected, encoding='utf-8')
+
+
+def cleanup_old_processes() -> None:
+    if not CLEANUP.exists():
+        return
+    result = subprocess.run([str(venv_python()), str(CLEANUP)], cwd=str(ROOT), check=False)
+    if result.returncode != 0:
+        raise RuntimeError('Could not safely clean up an older Diehl worker process.')
 
 
 def read_config() -> dict:
@@ -99,11 +108,6 @@ def ping_worker(timeout: float = 1.0) -> dict | None:
 
 
 def start_worker() -> None:
-    current = ping_worker()
-    if current and str(current.get('version')) == '4.0':
-        print('Diehl VIN worker v4 is already running.')
-        return
-
     if not SERVICE.exists():
         raise RuntimeError('service_v4.py is missing. Download a fresh Local Worker package.')
 
@@ -158,6 +162,7 @@ def main() -> None:
 
     print('Diehl VIN v4')
     ensure_environment()
+    cleanup_old_processes()
 
     workbook = configured_workbook()
     if not workbook:
