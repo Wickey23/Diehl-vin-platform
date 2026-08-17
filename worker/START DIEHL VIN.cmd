@@ -3,7 +3,8 @@ setlocal EnableExtensions
 
 set "BASE=%LocalAppData%\DiehlVINWorker"
 set "INSTALLDIR=%BASE%\v4"
-set "RAW=https://raw.githubusercontent.com/Wickey23/Diehl-vin-platform/main/worker"
+set "WORKER_REF=2a1b3a35b20465b9da2fc9d0d2f4850dd8d9f9b3"
+set "RAW=https://raw.githubusercontent.com/Wickey23/Diehl-vin-platform/%WORKER_REF%/worker"
 set "PYVER=3.12.10"
 set "PYURL=https://www.python.org/ftp/python/%PYVER%/python-%PYVER%-amd64.exe"
 set "PYINSTALLER=%TEMP%\diehl-python-%PYVER%-amd64.exe"
@@ -12,16 +13,15 @@ set "PY312=%LocalAppData%\Programs\Python\Python312\python.exe"
 title Diehl VIN - Setup and Start
 color 0F
 echo ============================================================
-echo  DIEHL VIN - SETUP AND START v4.5
+echo  DIEHL VIN - SETUP AND START v4.6
 echo ============================================================
 echo.
-echo This launcher installs/updates the worker into:
+echo Permanent runtime:
 echo %INSTALLDIR%
-echo.
-echo It does NOT depend on files beside this CMD file.
+echo Worker revision: %WORKER_REF%
 echo.
 
-echo [1/5] Downloading current Diehl program files...
+echo [1/5] Downloading verified Diehl program files...
 if not exist "%INSTALLDIR%" mkdir "%INSTALLDIR%"
 if errorlevel 1 goto :fail_install
 
@@ -42,7 +42,7 @@ if errorlevel 1 goto :fail_download
 call :download "README_LOCAL.txt"
 if errorlevel 1 goto :fail_download
 
-echo       Current program files verified.
+echo       Verified program revision installed.
 echo.
 
 echo [2/5] Checking Python 3.12...
@@ -68,7 +68,7 @@ if not defined PYEXE goto :fail_python_missing
 echo       Python ready: %PYEXE%
 echo.
 
-echo [3/5] Preparing local environment...
+echo [3/5] Verifying and repairing local environment if needed...
 echo [4/5] Finding shared OneDrive workbook, organizing sheets, and starting worker...
 echo.
 cd /d "%INSTALLDIR%"
@@ -84,11 +84,10 @@ timeout /t 3 /nobreak >nul
 exit /b 0
 
 :download
-set "FILE=%~1"
 set "TMP=%INSTALLDIR%\%~1.download"
 del /q "%TMP%" >nul 2>nul
 echo       %~1
-curl.exe -fsSL --retry 3 --connect-timeout 15 --max-time 90 -o "%TMP%" "%RAW%/%~1?v=%RANDOM%"
+curl.exe -fsSL --retry 3 --connect-timeout 15 --max-time 90 -o "%TMP%" "%RAW%/%~1"
 if errorlevel 1 exit /b 1
 for %%S in ("%TMP%") do if %%~zS LSS 10 exit /b 1
 move /Y "%TMP%" "%INSTALLDIR%\%~1" >nul
@@ -98,7 +97,7 @@ exit /b 0
 
 :fail_download
 echo.
-echo ERROR: Could not download all required Diehl worker files.
+echo ERROR: Could not download the verified Diehl worker revision.
 echo Check the network connection and try again.
 goto :failed
 
