@@ -14,21 +14,33 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Build v4 local worker zip
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate worker Python syntax
         run: |
-          mkdir -p dist/Diehl_VIN_Local_Worker
-          cp "worker/START DIEHL VIN.cmd" dist/Diehl_VIN_Local_Worker/
-          cp worker/DiehlInitializer.py dist/Diehl_VIN_Local_Worker/
-          cp worker/service_v4.py dist/Diehl_VIN_Local_Worker/
-          cp worker/README_LOCAL.txt dist/Diehl_VIN_Local_Worker/
-          cp worker/configure_workbook.py dist/Diehl_VIN_Local_Worker/
-          cp worker/vin_lookup.py dist/Diehl_VIN_Local_Worker/
-          cp worker/dtna_login_and_sync.py dist/Diehl_VIN_Local_Worker/
-          cp worker/requirements.txt dist/Diehl_VIN_Local_Worker/
+          python -m py_compile worker/DiehlInitializer.py
+          python -m py_compile worker/service_v4.py
+          python -m py_compile worker/cleanup_old_diehl.py
+          python -m py_compile worker/configure_workbook.py
+          python -m py_compile worker/vin_lookup.py
+          python -m py_compile worker/dtna_login_and_sync.py
+      - name: Build v4.2 local worker zip
+        run: |
+          mkdir -p dist/Diehl_VIN_Local_Worker_v4_2
+          cp "worker/START DIEHL VIN.cmd" dist/Diehl_VIN_Local_Worker_v4_2/
+          cp worker/DiehlInitializer.py dist/Diehl_VIN_Local_Worker_v4_2/
+          cp worker/service_v4.py dist/Diehl_VIN_Local_Worker_v4_2/
+          cp worker/cleanup_old_diehl.py dist/Diehl_VIN_Local_Worker_v4_2/
+          cp worker/README_LOCAL.txt dist/Diehl_VIN_Local_Worker_v4_2/
+          cp worker/configure_workbook.py dist/Diehl_VIN_Local_Worker_v4_2/
+          cp worker/vin_lookup.py dist/Diehl_VIN_Local_Worker_v4_2/
+          cp worker/dtna_login_and_sync.py dist/Diehl_VIN_Local_Worker_v4_2/
+          cp worker/requirements.txt dist/Diehl_VIN_Local_Worker_v4_2/
           cd dist
-          zip -r Diehl_VIN_Local_Worker_v4.zip Diehl_VIN_Local_Worker
+          zip -r Diehl_VIN_Local_Worker_v4_2.zip Diehl_VIN_Local_Worker_v4_2
       - uses: actions/upload-artifact@v4
         with:
-          name: Diehl_VIN_Local_Worker_v4
-          path: dist/Diehl_VIN_Local_Worker_v4.zip
+          name: Diehl_VIN_Local_Worker_v4_2
+          path: dist/Diehl_VIN_Local_Worker_v4_2.zip
           if-no-files-found: error
