@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import re
@@ -100,28 +101,38 @@ def normalize_response(value: Any):
 
 
 def launch_context(p):
-    args = dict(user_data_dir=str(PROFILE_DIR), headless=False, viewport={'width': 1500, 'height': 900}, accept_downloads=True)
+    args = dict(
+        user_data_dir=str(PROFILE_DIR),
+        headless=False,
+        viewport={'width': 1500, 'height': 900},
+        accept_downloads=True,
+    )
     try:
         return p.chromium.launch_persistent_context(channel='msedge', **args)
     except PlaywrightError:
         return p.chromium.launch_persistent_context(**args)
 
 
+def dom_click(locator) -> bool:
+    try:
+        if locator.count() and locator.first.is_visible():
+            locator.first.evaluate('(el) => el.click()')
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def auto_login(page):
-    page.wait_for_timeout(1000)
-    for pat in (r'^Login$', r'^Log\s*In$', r'^Sign\s*In$', r'Continue'):
+    page.wait_for_timeout(800)
+    for pat in (r'^Login$', r'^Log\s*In$', r'^Sign\s*In$', r'^Continue$'):
         for loc in (
             page.get_by_role('button', name=re.compile(pat, re.I)),
             page.get_by_role('link', name=re.compile(pat, re.I)),
         ):
-            try:
-                for i in range(loc.count()):
-                    if loc.nth(i).is_visible():
-                        loc.nth(i).click()
-                        page.wait_for_timeout(1800)
-                        return
-            except Exception:
-                pass
+            if dom_click(loc):
+                page.wait_for_timeout(1200)
+                return
 
 
 def fetch_sales(page):
@@ -131,25 +142,7 @@ def fetch_sales(page):
     )
 
 
-def click_visible(page, patterns):
-    for pat in patterns:
-        for loc in (
-            page.get_by_role('button', name=re.compile(pat, re.I)),
-            page.get_by_role('link', name=re.compile(pat, re.I)),
-            page.get_by_text(re.compile(pat, re.I), exact=False),
-        ):
-            try:
-                for i in range(loc.count()):
-                    if loc.nth(i).is_visible():
-                        loc.nth(i).click()
-                        return True
-            except Exception:
-                pass
-    return False
-
-
 def wait_for_sales_page(page, timeout_seconds=300):
-    print('Waiting for DTNA Sales Order login/MFA to finish...')
     deadline = time.time() + timeout_seconds
     while time.time() < deadline:
         auto_login(page)
@@ -159,15 +152,12 @@ def wait_for_sales_page(page, timeout_seconds=300):
                 return
         except Exception:
             pass
-        page.wait_for_timeout(1500)
-    print('DTNA still needs login/MFA. Complete it in the browser and wait for the Sales Order page.')
-    input('Press ENTER after the Sales Order Search panel is visible... ')
+        page.wait_for_timeout(1000)
+    raise RuntimeError('DTNA Sales Order did not become ready. Complete login/MFA and retry.')
 
 
 def uncheck_orders_to_be_reviewed(page):
     pattern = re.compile(r'Orders\s+To\s+Be\s+Reviewed', re.I)
-
-    # Best case: the checkbox has an accessible label.
     try:
         control = page.get_by_label(pattern)
         for i in range(control.count()):
@@ -175,16 +165,13 @@ def uncheck_orders_to_be_reviewed(page):
             if item.is_visible():
                 try:
                     if item.is_checked():
-                        item.uncheck(force=True)
-                        page.wait_for_timeout(300)
-                    return True
+                        item.evaluate('(el) => el.click()')
+                    return
                 except Exception:
                     pass
     except Exception:
         pass
 
-    # Current DTNA uses a custom checkbox. Find the checkbox whose nearby text
-    # contains the Orders To Be Reviewed label and click only when checked.
     try:
         boxes = page.locator('input[type="checkbox"]')
         for i in range(boxes.count()):
@@ -193,54 +180,34 @@ def uncheck_orders_to_be_reviewed(page):
                 nearby = box.evaluate("el => (el.closest('label') || el.parentElement || el).innerText || ''")
                 if pattern.search(nearby or ''):
                     if box.is_checked():
-                        box.uncheck(force=True)
-                        page.wait_for_timeout(300)
-                    return True
+                        box.evaluate('(el) => el.click()')
+                    return
             except Exception:
                 pass
     except Exception:
         pass
 
-    # Material/custom checkbox: locate the label text and click its row if it
-    # currently exposes a checked state.
-    try:
-        label = page.get_by_text(pattern, exact=False).first
-        if label.count() and label.is_visible():
-            row = label.locator('xpath=ancestor::*[self::label or @role="checkbox" or contains(@class,"checkbox")][1]')
-            if row.count():
-                aria = row.get_attribute('aria-checked')
-                classes = row.get_attribute('class') or ''
-                if aria == 'true' or 'checked' in classes.lower():
-                    row.click(force=True)
-                    page.wait_for_timeout(300)
-                return True
-    except Exception:
-        pass
 
-    log('Warning: could not positively identify Orders To Be Reviewed checkbox; API request still forces orderToReview=false.')
-    return False
-
-
-def prepare_sales_search(page):
+def search_sales(page):
     wait_for_sales_page(page)
     uncheck_orders_to_be_reviewed(page)
-    if not click_visible(page, [r'^Search$']):
-        raise RuntimeError('Could not press Search on the Sales Order page.')
-    page.wait_for_timeout(1800)
+    search = page.get_by_role('button', name=re.compile(r'^Search$', re.I))
+    if not dom_click(search):
+        raise RuntimeError('Could not press Search on Sales Order.')
+    page.wait_for_timeout(1200)
 
 
 def fetch_all_sales(page):
-    prepare_sales_search(page)
+    search_sales(page)
     last_error = None
     for _ in range(8):
         try:
-            data = fetch_sales(page)
-            rows = normalize_response(data)
+            rows = normalize_response(fetch_sales(page))
             if rows:
                 return rows
         except Exception as exc:
             last_error = exc
-        page.wait_for_timeout(1200)
+        page.wait_for_timeout(1000)
     if last_error:
         raise last_error
     return []
@@ -251,54 +218,71 @@ def wait_for_dealer_reporting(page, timeout_seconds=300):
     while time.time() < deadline:
         auto_login(page)
         try:
-            label = page.get_by_text(re.compile(r'Order\s*Received\s*Date', re.I), exact=False)
+            label = page.get_by_text(re.compile(r'^\s*Order\s*Received\s*Date\s*$', re.I), exact=False)
             if label.count() and label.first.is_visible():
                 return
         except Exception:
             pass
-        page.wait_for_timeout(1500)
-    print('Dealer Reporting still needs login/MFA. Complete it in the browser.')
-    input('Press ENTER when the Dealer Reporting search panel is visible... ')
+        page.wait_for_timeout(1000)
+    raise RuntimeError('Dealer Reporting did not become ready. Complete login/MFA and retry.')
 
 
 def open_order_received_calendar(page):
-    pattern = re.compile(r'Order\s*Received\s*Date', re.I)
+    # Target only the date field and its own calendar toggle. Do not click arbitrary text/buttons.
+    label = page.get_by_text(re.compile(r'^\s*Order\s*Received\s*Date\s*$', re.I), exact=False)
     try:
-        label = page.get_by_text(pattern, exact=False).first
-        if label.count() and label.is_visible():
-            container = label.locator('xpath=ancestor::*[self::div or self::label or self::td][1]')
-            for selector in ('button', '[role="button"]', 'mat-icon', 'svg'):
-                candidate = container.locator(selector)
+        if label.count() and label.first.is_visible():
+            field = label.first.locator('xpath=ancestor::*[self::mat-form-field or self::div][1]')
+            for selector in (
+                'button[aria-label*="calendar" i]',
+                'button[aria-haspopup="dialog"]',
+                'mat-datepicker-toggle button',
+                'button',
+            ):
+                candidate = field.locator(selector)
                 for i in range(candidate.count()):
-                    try:
-                        if candidate.nth(i).is_visible():
-                            candidate.nth(i).click()
-                            page.wait_for_timeout(500)
-                            return True
-                    except Exception:
-                        pass
+                    c = candidate.nth(i)
+                    if c.is_visible():
+                        c.evaluate('(el) => el.click()')
+                        page.wait_for_timeout(400)
+                        return True
     except Exception:
         pass
-    return click_visible(page, [r'Order\s*Received\s*Date', r'calendar', r'choose\s*date'])
+
+    for selector in (
+        'button[aria-label*="Order Received" i]',
+        'button[aria-label*="calendar" i]',
+        'mat-datepicker-toggle button',
+    ):
+        try:
+            candidate = page.locator(selector)
+            for i in range(candidate.count()):
+                c = candidate.nth(i)
+                if c.is_visible():
+                    c.evaluate('(el) => el.click()')
+                    page.wait_for_timeout(400)
+                    return True
+        except Exception:
+            pass
+    return False
 
 
 def set_widest_date_range(page):
     if not open_order_received_calendar(page):
-        print('Click the calendar icon next to Order Received Date.')
-        input('Press ENTER when the date-range picker is open... ')
-    page.wait_for_timeout(700)
+        raise RuntimeError('Could not open the Order Received Date picker.')
 
+    range_pattern = re.compile(r'^\s*-\s*48\s*months\s*to\s*\+\s*12\s*months\s*$', re.I)
     selected = False
-    range_pattern = re.compile(r'-\s*48\s*months\s*to\s*\+\s*12\s*months', re.I)
     for loc in (
-        page.get_by_text(range_pattern, exact=False),
         page.get_by_role('option', name=range_pattern),
+        page.get_by_text(range_pattern, exact=False),
         page.get_by_role('button', name=range_pattern),
     ):
         try:
             for i in range(loc.count()):
-                if loc.nth(i).is_visible():
-                    loc.nth(i).click()
+                item = loc.nth(i)
+                if item.is_visible():
+                    item.evaluate('(el) => el.click()')
                     selected = True
                     break
             if selected:
@@ -306,110 +290,114 @@ def set_widest_date_range(page):
         except Exception:
             pass
     if not selected:
-        print('Select "-48 months to +12 months" in Dealer Reporting.')
-        input('Press ENTER when selected... ')
+        raise RuntimeError('Could not select -48 months to +12 months.')
 
+    ok = page.get_by_role('button', name=re.compile(r'^OK$', re.I))
     try:
-        ok = page.get_by_role('button', name=re.compile(r'^OK$', re.I))
         if ok.count() and ok.last.is_visible():
-            ok.last.click()
-            page.wait_for_timeout(500)
+            ok.last.evaluate('(el) => el.click()')
+            page.wait_for_timeout(300)
     except Exception:
         pass
 
-    # Critical: the date-range choice does not populate results until Search is pressed.
-    if not click_visible(page, [r'^Search$']):
-        raise RuntimeError('Could not press Search after selecting the -48 to +12 month range.')
-    page.wait_for_timeout(2200)
+    search = page.get_by_role('button', name=re.compile(r'^Search$', re.I))
+    if not dom_click(search):
+        raise RuntimeError('Could not press Search in Dealer Reporting.')
+    wait_for_report_results(page)
+
+
+def wait_for_report_results(page, timeout_seconds=75):
+    deadline = time.time() + timeout_seconds
+    stable = 0
+    while time.time() < deadline:
+        spinner_visible = False
+        for selector in ('mat-spinner', '.mat-progress-spinner', '.mat-mdc-progress-spinner', '[role="progressbar"]'):
+            try:
+                loc = page.locator(selector)
+                spinner_visible = any(loc.nth(i).is_visible() for i in range(loc.count()))
+                if spinner_visible:
+                    break
+            except Exception:
+                pass
+
+        export = page.get_by_role('button', name=re.compile(r'Export\s*to\s*Excel|^Export$', re.I))
+        export_ready = False
+        try:
+            export_ready = export.count() > 0 and export.first.is_visible() and not export.first.is_disabled()
+        except Exception:
+            pass
+
+        if not spinner_visible and export_ready:
+            stable += 1
+            if stable >= 3:
+                return
+        else:
+            stable = 0
+        page.wait_for_timeout(500)
+    raise RuntimeError('Dealer Reporting results did not finish loading.')
+
+
+def click_export_to_excel(page):
+    for pat in (r'^Export\s*to\s*Excel$', r'^Export$'):
+        loc = page.get_by_role('button', name=re.compile(pat, re.I))
+        if dom_click(loc):
+            page.wait_for_timeout(500)
+            return True
+        loc = page.get_by_role('link', name=re.compile(pat, re.I))
+        if dom_click(loc):
+            page.wait_for_timeout(500)
+            return True
+    return False
 
 
 def choose_auto_vin(page):
-    pattern = re.compile(r'AUTO\s*VIN', re.I)
-
-    # Native select dropdowns.
+    # Prefer native selects. This never scans/clicks unrelated comboboxes.
     try:
         for i in range(page.locator('select').count()):
             sel = page.locator('select').nth(i)
+            if not sel.is_visible():
+                continue
             opts = sel.locator('option').all_text_contents()
-            match = next((x for x in opts if pattern.search(x or '')), None)
+            match = next((x for x in opts if re.fullmatch(r'\s*AUTO\s*VIN\s*', x or '', re.I)), None)
             if match:
                 sel.select_option(label=match)
-                page.wait_for_timeout(400)
+                page.wait_for_timeout(300)
                 return True
     except Exception:
         pass
 
-    # Angular/Material comboboxes and custom dropdowns. Open each visible one,
-    # then look for the saved AUTO VIN option in the overlay.
-    for selector in ('[role="combobox"]', 'mat-select', '.mat-select', '.mat-mdc-select', '[aria-haspopup="listbox"]'):
-        try:
-            controls = page.locator(selector)
-            for i in range(controls.count()):
-                control = controls.nth(i)
-                if not control.is_visible():
-                    continue
-                try:
-                    text = control.inner_text(timeout=500)
-                except Exception:
-                    text = ''
-                if pattern.search(text or ''):
-                    return True
-                try:
-                    control.click(force=True)
-                    page.wait_for_timeout(350)
-                    option = page.get_by_text(pattern, exact=False)
-                    for j in range(option.count()):
-                        if option.nth(j).is_visible():
-                            option.nth(j).click(force=True)
-                            page.wait_for_timeout(400)
-                            return True
-                    page.keyboard.press('Escape')
-                except Exception:
-                    pass
-        except Exception:
-            pass
-
-    # Sometimes the option is already rendered in a popup after Export to Excel.
+    pattern = re.compile(r'^\s*AUTO\s*VIN\s*$', re.I)
     for loc in (
-        page.get_by_text(pattern, exact=False),
         page.get_by_role('option', name=pattern),
+        page.get_by_text(pattern, exact=False),
         page.get_by_role('menuitem', name=pattern),
     ):
         try:
             for i in range(loc.count()):
-                if loc.nth(i).is_visible():
-                    loc.nth(i).click(force=True)
-                    page.wait_for_timeout(400)
+                item = loc.nth(i)
+                if item.is_visible():
+                    item.evaluate('(el) => el.click()')
+                    page.wait_for_timeout(300)
                     return True
         except Exception:
             pass
-
-    # Do not kill the whole sync if DTNA changes the template control again.
-    print('Could not automatically select the saved AUTO VIN template.')
-    print('In the export dialog, select AUTO VIN manually.')
-    input('Press ENTER after AUTO VIN is selected... ')
-    return True
+    raise RuntimeError('Could not select the saved AUTO VIN template.')
 
 
 def download_auto_vin(page):
     page.goto(REPORT_URL, wait_until='domcontentloaded', timeout=120000)
-    auto_login(page)
-    page.wait_for_timeout(1800)
     wait_for_dealer_reporting(page)
-
-    # Required sequence: calendar -> -48 months to +12 months -> Search -> Export.
     set_widest_date_range(page)
 
-    if not click_visible(page, [r'Export\s*to\s*Excel', r'^Export$', r'^Reporting$']):
+    if not click_export_to_excel(page):
         raise RuntimeError('Could not find Export to Excel in Dealer Reporting.')
-    page.wait_for_timeout(900)
 
     choose_auto_vin(page)
-    page.wait_for_timeout(400)
 
     with page.expect_download(timeout=120000) as info:
-        if not click_visible(page, [r'^Export$', r'Download', r'Export\s*to\s*Excel']):
-            raise RuntimeError('Could not click the final Export button after selecting AUTO VIN.')
+        final = page.get_by_role('button', name=re.compile(r'^Export$|^Download$', re.I))
+        if not dom_click(final):
+            raise RuntimeError('Could not click the final Export button.')
     dl = info.value
     suffix = Path(dl.suggested_filename).suffix or '.xlsx'
     dest = REPORT_DIR / f'AUTO_VIN_{datetime.now():%Y%m%d_%H%M%S}{suffix}'
@@ -518,20 +506,27 @@ def save(rows, changes):
 
 
 def main():
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument('--login-only', action='store_true')
+    args, _ = parser.parse_known_args()
+
     ensure_dirs()
     status(status='RUNNING', lastRun=datetime.now().strftime('%Y-%m-%d %H:%M:%S'), message='DTNA browser starting', loginProfile=PROFILE_DIR)
+
     with sync_playwright() as p:
         ctx = launch_context(p)
         try:
             page = ctx.pages[0] if ctx.pages else ctx.new_page()
             page.goto(SALES_URL, wait_until='domcontentloaded', timeout=120000)
-            auto_login(page)
+            wait_for_sales_page(page)
+
+            if args.login_only:
+                print('DTNA login is ready. You can close this window when finished.')
+                input('Press ENTER to close DTNA login... ')
+                return
 
             rows = fetch_all_sales(page)
             log(f'Downloaded {len(rows):,} Sales Order rows with Orders To Be Reviewed OFF')
-            if len(rows) <= 1:
-                log('Warning: Sales Order returned 1 or fewer rows even after clearing Orders To Be Reviewed. Check DTNA filters if this is unexpected.')
-
             report = download_auto_vin(page)
             enrich(rows, report_map(report))
         finally:
