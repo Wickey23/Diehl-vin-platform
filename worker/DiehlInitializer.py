@@ -14,7 +14,6 @@ import tkinter as tk
 from tkinter import messagebox
 
 from shared_workbook import find_shared_workbook, load_cached_path, WORKBOOK_NAME
-from workbook_organizer import organize_workbook
 
 ROOT = Path(__file__).resolve().parent
 VENV = ROOT / '.venv'
@@ -117,15 +116,14 @@ def save_config(workbook: Path) -> None:
 
 def resolve_shared_workbook() -> Path:
     cached = load_cached_path(CONFIG)
-    print('[4/5] Finding shared workbook and organizing sheets...')
+    print('[4/5] Finding shared OneDrive workbook...')
     print(f'      Runtime Python: {sys.executable}')
     print(f'      Locating shared workbook: {WORKBOOK_NAME}')
     workbook = find_shared_workbook(cached)
     print(f'      Found: {workbook}')
-    print('      Organizing workbook sheets: VIN In-Service + DTNA...')
-    organize_workbook(workbook)
     save_config(workbook)
-    print('      Shared workbook ready.')
+    print('      Shared workbook bound to this worker.')
+    print('      Sheet creation/organization will happen during actual data writes, not during startup.')
     return workbook
 
 
@@ -197,7 +195,6 @@ def main() -> None:
         result = subprocess.run([str(py), str(Path(__file__).resolve()), '--inside-venv'], cwd=str(ROOT))
         raise SystemExit(result.returncode)
 
-    # From this point onward every COM/Excel import runs in the verified venv.
     current = Path(sys.executable).resolve()
     expected = venv_python().resolve()
     if os.path.normcase(str(current)) != os.path.normcase(str(expected)):
