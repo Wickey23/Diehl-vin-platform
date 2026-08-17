@@ -3,7 +3,7 @@ setlocal EnableExtensions
 
 set "BASE=%LocalAppData%\DiehlVINWorker"
 set "INSTALLDIR=%BASE%\v4"
-set "WORKER_REF=2a1b3a35b20465b9da2fc9d0d2f4850dd8d9f9b3"
+set "WORKER_REF=1204c6e6e1db28c0d790ea298f31ee2389ee3ecc"
 set "RAW=https://raw.githubusercontent.com/Wickey23/Diehl-vin-platform/%WORKER_REF%/worker"
 set "PYVER=3.12.10"
 set "PYURL=https://www.python.org/ftp/python/%PYVER%/python-%PYVER%-amd64.exe"
@@ -13,7 +13,7 @@ set "PY312=%LocalAppData%\Programs\Python\Python312\python.exe"
 title Diehl VIN - Setup and Start
 color 0F
 echo ============================================================
-echo  DIEHL VIN - SETUP AND START v4.6
+echo  DIEHL VIN - SETUP AND START v4.7
 echo ============================================================
 echo.
 echo Permanent runtime:
@@ -69,7 +69,7 @@ echo       Python ready: %PYEXE%
 echo.
 
 echo [3/5] Verifying and repairing local environment if needed...
-echo [4/5] Finding shared OneDrive workbook, organizing sheets, and starting worker...
+echo [4/5] Switching to verified venv Python, organizing shared workbook, and starting worker...
 echo.
 cd /d "%INSTALLDIR%"
 "%PYEXE%" DiehlInitializer.py
