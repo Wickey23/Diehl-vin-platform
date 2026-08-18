@@ -25,8 +25,9 @@ DATABASE_PING = 'http://127.0.0.1:8766/ping'
 LOG_DIR = ROOT / 'logs'
 WORKER_LOG = LOG_DIR / 'worker.log'
 DATABASE_LOG = LOG_DIR / 'database.log'
-SERVICE = ROOT / 'service_v4.py'
+SERVICE = ROOT / 'service_v5.py'
 DATABASE_SERVICE = ROOT / 'database_service.py'
+EXPECTED_WORKER_VERSION = '5.5'
 
 
 def venv_python() -> Path:
@@ -49,6 +50,7 @@ def import_check(py: Path) -> bool:
         'import fastapi, uvicorn, openpyxl, psutil; '
         'import pythoncom; '
         'import win32com.client; '
+        'import playwright.sync_api; '
         'print("dependency-check-ok")'
     )
     result = subprocess.run(
@@ -115,6 +117,7 @@ def save_config(workbook: Path) -> None:
         'vinLookupCommand': f'"{py}" "{ROOT / "vin_lookup.py"}"',
         'port': 8765,
         'databasePort': 8766,
+        'vinInServiceSource': 'OWL',
     }, indent=2), encoding='utf-8')
 
 
@@ -127,7 +130,8 @@ def resolve_shared_workbook() -> Path:
     print(f'      Found: {workbook}')
     save_config(workbook)
     print('      Shared workbook bound to this worker.')
-    print('      Workbook writes happen only when actual DTNA/VIN data is saved.')
+    print('      VIN In-Service source: OWL.')
+    print('      DTNA Sales Order/AUTO VIN remains a separate workflow.')
     return workbook
 
 
@@ -191,16 +195,16 @@ def start_services() -> None:
     existing = ping(WORKER_PING, 'DiehlVINWorker', .5)
     if existing:
         version = str(existing.get('version') or '')
-        if version != '4.1':
+        if version != EXPECTED_WORKER_VERSION:
             raise RuntimeError(
                 f'An older Diehl worker (v{version or "unknown"}) is already running on port 8765. '
-                'Close that old Diehl worker before starting this version.'
+                'Use Stop All Running, then start this version.'
             )
-        print('      Main worker already running: v4.1.')
+        print(f'      Main worker already running: v{EXPECTED_WORKER_VERSION}.')
     else:
-        proc = spawn_background(SERVICE, WORKER_LOG, 'Diehl VIN Worker v4.1')
+        proc = spawn_background(SERVICE, WORKER_LOG, f'Diehl VIN Worker v{EXPECTED_WORKER_VERSION}')
         info = wait_ready(proc, WORKER_PING, 'DiehlVINWorker', WORKER_LOG)
-        if str(info.get('version') or '') != '4.1':
+        if str(info.get('version') or '') != EXPECTED_WORKER_VERSION:
             raise RuntimeError(f'Unexpected worker version started: {info.get("version")}')
         print('      Local worker connected on 127.0.0.1:8765.')
 
