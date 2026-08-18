@@ -4,6 +4,7 @@ import Link from 'next/link';
 import {useEffect,useState} from 'react';
 
 const LOCAL='http://127.0.0.1:8765';
+const LOCAL_DB='http://127.0.0.1:8766';
 const LOGIN_KEY='diehl-dtna-login-initialized-v1';
 
 type Check={id:string;label:string;status:'ok'|'warning'|'missing';detail:string};
@@ -14,6 +15,7 @@ export default function Initializer(){
   const [workerReady,setWorkerReady]=useState(false);
   const [dtnaReady,setDtnaReady]=useState(false);
   const [checking,setChecking]=useState(false);
+  const [stopping,setStopping]=useState(false);
   const [message,setMessage]=useState('Checking this computer…');
 
   async function check(){
@@ -49,6 +51,22 @@ export default function Initializer(){
     }catch{setMessage('Could not open DTNA. Confirm the local worker is running, then try again.')}
   }
 
+  async function stopAllRunning(){
+    setStopping(true);
+    setMessage('Stopping Diehl local services…');
+    try{
+      const r=await fetch(`${LOCAL_DB}/control/stop-all`,{method:'POST',cache:'no-store'});
+      if(!r.ok) throw new Error('Stop control unavailable');
+      setWorker(null);setChecks([]);setWorkerReady(false);
+      setMessage('All running Diehl local services were stopped. Now run START DIEHL VIN.cmd to start the current version.');
+    }catch{
+      setMessage('This older worker cannot be stopped from the website yet. Run STOP ALL DIEHL.cmd from the newest worker package, then run START DIEHL VIN.cmd.');
+    }finally{
+      setStopping(false);
+      setTimeout(()=>check(),1800);
+    }
+  }
+
   const ready=workerReady&&dtnaReady;
 
   return <main className="initializer-page">
@@ -58,7 +76,7 @@ export default function Initializer(){
     </section>
 
     {!workerReady&&<section className="download-card">
-      <div><span className="kicker">STEP 1 · ONE-TIME SETUP</span><h2>Download the local worker</h2><p>Download the ZIP, extract it, and double-click <b>START DIEHL VIN.cmd</b>. It installs/updates the permanent runtime, finds the shared OneDrive workbook, organizes the workbook, starts the local worker, and opens this site.</p></div>
+      <div><span className="kicker">STEP 1 · ONE-TIME SETUP</span><h2>Download the local worker</h2><p>Download the ZIP, extract it, and double-click <b>START DIEHL VIN.cmd</b>. It installs/updates the permanent runtime, finds the shared OneDrive workbook, starts the local worker, and opens this site.</p></div>
       <div className="download-actions"><a className="download-primary" href="/api/download-worker">Download Local Worker</a><small>After download: Extract → double-click START DIEHL VIN.cmd</small></div>
     </section>}
 
@@ -69,7 +87,11 @@ export default function Initializer(){
 
     <section className="connection-card">
       <div><span className="kicker">LOCAL STATUS</span><h2>{worker?`Connected to ${worker.hostname}`:'Worker not detected'}</h2><p>{message}</p>{worker?.master_workbook&&<p><b>Shared workbook:</b> {worker.master_workbook}</p>}</div>
-      <div className="row"><button onClick={check} disabled={checking}>{checking?'Checking…':'Check again'}</button>{workerReady&&<button className="button-secondary" onClick={initializeDtna}>{dtnaReady?'Open / Refresh My DTNA Login':'Initialize My DTNA Login'}</button>}</div>
+      <div className="row" style={{gap:10,flexWrap:'wrap'}}>
+        <button onClick={check} disabled={checking}>{checking?'Checking…':'Check again'}</button>
+        <button onClick={stopAllRunning} disabled={stopping} style={{background:'#b42318',color:'#fff',border:'1px solid #b42318'}}>{stopping?'Stopping…':'Stop All Running'}</button>
+        {workerReady&&<button className="button-secondary" onClick={initializeDtna}>{dtnaReady?'Open / Refresh My DTNA Login':'Initialize My DTNA Login'}</button>}
+      </div>
     </section>
 
     <section className="prereq-card">
