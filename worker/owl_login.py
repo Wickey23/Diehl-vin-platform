@@ -9,8 +9,7 @@ from playwright.sync_api import sync_playwright
 ROOT = Path(__file__).resolve().parent
 LOCAL_APPDATA = Path(os.environ.get('LOCALAPPDATA', str(ROOT)))
 PROFILE_DIR = LOCAL_APPDATA / 'DiehlDTNAManual' / 'browser_profile'
-OWL_URL_FILE = LOCAL_APPDATA / 'DiehlVINWorker' / 'owl' / 'owl_url.txt'
-PORTAL_URL = 'https://dtnacontent-dtna.prd.freightliner.com/content/public/dtnaportalpublic.html'
+OWL_URL = 'https://secure.freightliner.com/iwarranty/signOn'
 
 
 def launch_context(playwright):
@@ -27,18 +26,13 @@ def main() -> int:
         context = launch_context(p)
         try:
             page = context.pages[0] if context.pages else context.new_page()
-            target = PORTAL_URL
-            if OWL_URL_FILE.exists():
-                saved = OWL_URL_FILE.read_text(encoding='utf-8').strip()
-                if saved.startswith('http'):
-                    target = saved
-            page.goto(target, wait_until='domcontentloaded', timeout=120_000)
+            page.goto(OWL_URL, wait_until='domcontentloaded', timeout=120_000)
             print()
             print('OWL login/browser opened for this Windows user.')
-            print('Complete your own DTNA login/MFA if prompted, then navigate to OWL Vehicle/VIN Search.')
-            print('Leave OWL ready for VIN In-Service checks.')
+            print('Complete your own Freightliner login/MFA if prompted.')
+            print('VIN In-Service will use Coverage Info / Check Coverage and Major Components automatically.')
             print()
-            input('Press ENTER here when your OWL session is ready... ')
+            input('Press ENTER here when the OWL Home page is visible... ')
         finally:
             try:
                 context.close()
