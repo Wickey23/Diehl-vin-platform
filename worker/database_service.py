@@ -23,7 +23,7 @@ DIEHL_PRODUCTS = {'DiehlVINWorker', 'DiehlVINDatabase'}
 DTNA_RUNTIME = ROOT / 'dtna_runtime.py'
 PROFILE = Path(os.environ.get('LOCALAPPDATA', str(ROOT))) / 'DiehlDTNAManual' / 'browser_profile'
 
-app = FastAPI(title='Diehl VIN Database Viewer', version='2.0')
+app = FastAPI(title='Diehl VIN Database Viewer', version='2.2')
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -53,6 +53,81 @@ def workbook_path() -> Path:
         data = {}
     value = str(data.get('masterWorkbook') or '').strip()
     return Path(os.path.expandvars(value)).expanduser()
+
+
+def _norm_path(value: str | Path) -> str:
+    try:
+        return os.path.normcase(os.path.abspath(str(value))).rstrip('\\/')
+    except Exception:
+        return str(value).lower().rstrip('\\/')
+
+
+def open_workbook_locally() -> Path:
+    path = workbook_path().resolve()
+    if not str(path).strip():
+        raise HTTPException(404, 'No shared Excel workbook is configured yet.')
+    if not path.exists():
+        raise HTTPException(404, f'Shared Excel workbook was not found at: {path}')
+
+    try:
+        import pythoncom
+        import win32com.client
+    except Exception as exc:
+        raise HTTPException(500, f'Excel integration is unavailable: {exc}') from exc
+
+    pythoncom.CoInitialize()
+    excel = None
+    try:
+        try:
+            excel = win32com.client.GetActiveObject('Excel.Application')
+        except Exception:
+            excel = win32com.client.DispatchEx('Excel.Application')
+
+        target = _norm_path(path)
+        workbook = None
+        same_name = []
+        try:
+            for i in range(1, int(excel.Workbooks.Count) + 1):
+                candidate = excel.Workbooks.Item(i)
+                try:
+                    full = str(candidate.FullName or '')
+                    name = str(candidate.Name or '')
+                except Exception:
+                    continue
+                if full and _norm_path(full) == target:
+                    workbook = candidate
+                    break
+                if name.lower() == path.name.lower():
+                    same_name.append(candidate)
+        except Exception:
+            pass
+
+        if workbook is None and len(same_name) == 1:
+            workbook = same_name[0]
+
+        if workbook is None:
+            workbook = excel.Workbooks.Open(
+                str(path),
+                UpdateLinks=0,
+                ReadOnly=False,
+                IgnoreReadOnlyRecommended=True,
+                AddToMru=True,
+            )
+
+        excel.Visible = True
+        excel.UserControl = True
+        try:
+            workbook.Activate()
+            workbook.Windows(1).Activate()
+        except Exception:
+            pass
+        return path
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(500, f'Excel could not open the shared workbook: {exc}') from exc
+    finally:
+        pythoncom.CoUninitialize()
 
 
 def launch_dtna_runtime(args: list[str]) -> None:
@@ -122,7 +197,7 @@ def _exit_database_service() -> None:
 
 @app.get('/ping')
 def ping():
-    return {'ok': True, 'product': 'DiehlVINDatabase', 'version': '2.0', 'hostname': socket.gethostname()}
+    return {'ok': True, 'product': 'DiehlVINDatabase', 'version': '2.2', 'hostname': socket.gethostname()}
 
 
 @app.get('/database/sheets')
@@ -134,6 +209,12 @@ def sheets():
         'sheets': list(ALLOWED_SHEETS),
         'mode': 'Verified Excel mirror',
     }
+
+
+@app.post('/database/open-workbook')
+def open_database_workbook():
+    path = open_workbook_locally()
+    return {'ok': True, 'workbook': str(path), 'message': 'Opening the exact shared Excel workbook on this computer.'}
 
 
 @app.get('/database/{sheet_name}')
