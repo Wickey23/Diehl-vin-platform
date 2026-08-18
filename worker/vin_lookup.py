@@ -11,7 +11,7 @@ ROOT=Path(__file__).resolve().parent
 LOCAL_APPDATA=Path(os.environ.get('LOCALAPPDATA',str(ROOT)))
 DTNA_ROOT=LOCAL_APPDATA/'DiehlDTNAManual'/'data'
 CACHE=DTNA_ROOT/'output'/'dtna_sales_orders.xlsx'
-SYNC=ROOT/'dtna_login_and_sync.py'
+SYNC=ROOT/'dtna_runtime.py'
 RESULT=Path(os.environ.get('DIEHL_RESULT_FILE',str(ROOT/'vin-results.json')))
 VINS=[x.strip().upper() for x in os.environ.get('DIEHL_VINS','').splitlines() if x.strip()]
 
@@ -24,7 +24,9 @@ def sync_if_needed():
     if fresh_cache():return
     if not SYNC.exists():raise RuntimeError('DTNA sync automation is not installed')
     python=ROOT/'.venv'/'Scripts'/'python.exe'
-    subprocess.run([str(python if python.exists() else sys.executable),str(SYNC)],cwd=str(ROOT),check=False)
+    completed=subprocess.run([str(python if python.exists() else sys.executable),str(SYNC)],cwd=str(ROOT),check=False)
+    if completed.returncode!=0:
+        raise RuntimeError('DTNA refresh failed before VIN lookup. Check the DTNA window for the exact error.')
 
 
 def pick(row,*names):
