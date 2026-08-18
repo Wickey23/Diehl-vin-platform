@@ -12,7 +12,7 @@ set "PY312=%LocalAppData%\Programs\Python\Python312\python.exe"
 title Diehl VIN - Setup and Start
 color 0F
 echo ============================================================
-echo  DIEHL VIN - SETUP AND START v5.7
+echo  DIEHL VIN - SETUP AND START v5.9
 echo ============================================================
 echo.
 echo Permanent runtime:
@@ -97,7 +97,7 @@ if not "%RC%"=="0" goto :fail_initializer
 
 echo.
 echo [5/5] SUCCESS
-echo       Diehl VIN v5.7 and Database viewer are running.
+echo       Diehl VIN v5.9 and Database viewer are running.
 echo       VIN In-Service uses OWL Coverage Info + Major Components.
 echo       The website has been opened.
 echo.
