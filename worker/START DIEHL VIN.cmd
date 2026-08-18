@@ -42,6 +42,8 @@ call :copy_file "vin_lookup.py"
 if errorlevel 1 goto :fail_package
 call :copy_file "owl_lookup.py"
 if errorlevel 1 goto :fail_package
+call :copy_file "owl_login.py"
+if errorlevel 1 goto :fail_package
 call :copy_file "dtna_login_and_sync.py"
 if errorlevel 1 goto :fail_package
 call :copy_file "dtna_runtime.py"
