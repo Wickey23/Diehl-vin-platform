@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import re
 
-import dtna_base as base
+import dtna_login_and_sync as base
 
 
-# Keep the known-good Sales Order behavior used by the working local program.
+# Preserve the known-good working program behavior.
 try:
     base.PAYLOAD['orderToReview'] = True
 except Exception:
@@ -13,13 +13,7 @@ except Exception:
 
 
 def select_auto_vin(page) -> None:
-    """Select AUTO VIN from the Templates field in the Export to Excel dialog.
-
-    Dealer Reporting renders this field as a custom Angular/Material dropdown,
-    so generic combobox scanning is unreliable. Scope every click to the export
-    dialog and fall back to a manual selection instead of aborting the sync.
-    """
-    # Wait for the Export to Excel dialog itself, not just the page.
+    """Select AUTO VIN from the Templates field in the Export to Excel dialog."""
     dialog = None
     for selector in ('[role="dialog"]', 'mat-dialog-container', '.mat-dialog-container', '.mat-mdc-dialog-container'):
         try:
@@ -44,7 +38,6 @@ def select_auto_vin(page) -> None:
 
     scope = dialog if dialog is not None else page
 
-    # Native select, if DTNA ever exposes one.
     try:
         selects = scope.locator('select')
         for i in range(selects.count()):
@@ -59,7 +52,6 @@ def select_auto_vin(page) -> None:
     except Exception:
         pass
 
-    # Target the visible Templates field shown on the left side of the modal.
     opened = False
     try:
         template_text = scope.get_by_text(re.compile(r'^\s*Templates\s*$', re.I), exact=True)
@@ -68,20 +60,17 @@ def select_auto_vin(page) -> None:
             if not label.is_visible():
                 continue
             opened = bool(label.evaluate("""el => {
+                const field = el.closest('mat-form-field') || el.parentElement || el;
                 const candidates = [
-                    el.closest('mat-select'),
-                    el.closest('[role=combobox]'),
-                    el.parentElement && el.parentElement.querySelector('mat-select'),
-                    el.parentElement && el.parentElement.querySelector('[role=combobox]'),
-                    el.parentElement,
-                    el.closest('mat-form-field') && el.closest('mat-form-field').querySelector('mat-select,[role=combobox]')
+                    field.querySelector('mat-select'),
+                    field.querySelector('[role="combobox"]'),
+                    field.querySelector('.mat-select-trigger'),
+                    field.querySelector('.mat-mdc-select-trigger'),
+                    field
                 ].filter(Boolean);
                 for (const c of candidates) {
                     const r = c.getBoundingClientRect();
-                    if (r.width > 0 && r.height > 0) {
-                        c.click();
-                        return true;
-                    }
+                    if (r.width > 0 && r.height > 0) { c.click(); return true; }
                 }
                 return false;
             }"""))
@@ -90,8 +79,6 @@ def select_auto_vin(page) -> None:
     except Exception:
         pass
 
-    # Fallback: use the first visible select/combobox inside this modal, which
-    # is the Templates control in the current Dealer Reporting UI.
     if not opened:
         for selector in ('mat-select', '[role="combobox"]', '.mat-select-trigger', '.mat-mdc-select-trigger'):
             try:
@@ -129,8 +116,7 @@ def select_auto_vin(page) -> None:
     input('After AUTO VIN is selected, return here and press ENTER to continue... ')
 
 
-# Override only the fragile selector. All other behavior comes from the
-# supplied known-good DTNA program.
+# Override only the fragile export-template selector.
 base.select_auto_vin = select_auto_vin
 
 
