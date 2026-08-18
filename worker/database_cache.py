@@ -112,7 +112,7 @@ def _seed_dtna() -> bool:
             rows = [dict(row) for row in reader]
         if not headers:
             return False
-        write_table('DTNA', headers, rows, '', 'DTNA local output (last successful sync)')
+        write_table('DTNA', headers, rows, '', 'DTNA -> verified Excel save + local sync output')
         return True
     except Exception:
         return False
@@ -162,12 +162,30 @@ def _seed_vin() -> bool:
     return True
 
 
+def _dtna_mirror_is_stale(target: Path) -> bool:
+    if not DTNA_OUTPUT.exists():
+        return False
+    if not target.exists():
+        return True
+    try:
+        return DTNA_OUTPUT.stat().st_mtime > target.stat().st_mtime + 0.1
+    except Exception:
+        return True
+
+
 def read_table(sheet: str, limit: int = 10000, seed: bool = True) -> dict[str, Any]:
     if sheet not in ALLOWED:
         raise ValueError(f'Unsupported database sheet: {sheet}')
     target = _cache_path(sheet)
-    if not target.exists() and seed:
-        (_seed_dtna() if sheet == 'DTNA' else _seed_vin())
+
+    # DTNA already produces a local CSV only after its Excel-save phase succeeds.
+    # If a newer successful sync exists, rebuild the website mirror from that
+    # local output without opening or attaching to Excel at all.
+    if seed and sheet == 'DTNA' and _dtna_mirror_is_stale(target):
+        _seed_dtna()
+    elif not target.exists() and seed:
+        _seed_vin()
+
     if not target.exists():
         return {
             'sheet': sheet,
