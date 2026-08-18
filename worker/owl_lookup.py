@@ -67,33 +67,66 @@ def inject_hint(page, message: str) -> None:
 
 
 def find_vin_input(frame):
-    """Find the main OWL Product S/N field, never the left-side Quick Search box."""
+    """Find the main OWL Product S/N field and never the left-side Quick Search box."""
+    # 1) Exact legacy-table relationship: cell containing Product S/N -> next cell -> input.
     try:
-        rows = frame.locator('tr')
-        for i in range(rows.count()):
-            row = rows.nth(i)
-            text = re.sub(r'\s+', ' ', row.inner_text(timeout=500) or '').strip()
-            if re.search(r'\bProduct\s+S/N\s*:', text, re.I):
-                inputs = row.locator('input[type="text"], input:not([type])')
-                for j in range(inputs.count()):
-                    item = inputs.nth(j)
-                    if item.is_visible() and item.is_enabled():
-                        return item
+        loc = frame.locator("xpath=//td[contains(translate(normalize-space(.), 'abcdefghijklmnopqrstuvwxyz', 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'), 'PRODUCT S/N')]/following-sibling::td[1]//input[not(@type) or @type='text']")
+        for i in range(loc.count()):
+            item = loc.nth(i)
+            if item.is_visible() and item.is_enabled():
+                return item
     except Exception:
         pass
 
+    # 2) Search rows independently. A timeout/bad legacy row must not abort the whole scan.
     try:
-        labels = frame.get_by_text(re.compile(r'^\s*Product\s+S/N\s*:\s*$', re.I), exact=True)
-        for i in range(labels.count()):
-            label = labels.nth(i)
-            if not label.is_visible():
+        rows = frame.locator('tr')
+        count = rows.count()
+    except Exception:
+        count = 0
+    for i in range(count):
+        try:
+            row = rows.nth(i)
+            text = re.sub(r'\s+', ' ', row.text_content(timeout=250) or '').strip()
+            if not re.search(r'Product\s+S/N\s*:', text, re.I):
                 continue
-            row = label.locator('xpath=ancestor::tr[1]')
             inputs = row.locator('input[type="text"], input:not([type])')
             for j in range(inputs.count()):
                 item = inputs.nth(j)
                 if item.is_visible() and item.is_enabled():
                     return item
+        except Exception:
+            continue
+
+    # 3) DOM fallback that walks text-bearing cells and returns the adjacent input.
+    try:
+        handle = frame.evaluate_handle("""() => {
+          const cells = Array.from(document.querySelectorAll('td,th,label,span,b,font'));
+          for (const el of cells) {
+            const text = (el.textContent || '').replace(/\s+/g,' ').trim();
+            if (!/^Product\s+S\/N\s*:/i.test(text)) continue;
+            const row = el.closest('tr');
+            if (row) {
+              const cell = el.closest('td,th');
+              if (cell && cell.nextElementSibling) {
+                const input = cell.nextElementSibling.querySelector('input[type="text"],input:not([type])');
+                if (input) return input;
+              }
+              const inputs = row.querySelectorAll('input[type="text"],input:not([type])');
+              if (inputs.length) return inputs[0];
+            }
+          }
+          return null;
+        }""")
+        element = handle.as_element()
+        if element is not None:
+            locator = frame.locator('input').filter(has=frame.locator('xpath=.'))
+            # Playwright cannot directly convert an ElementHandle to Locator reliably here,
+            # so use the element handle itself via a temporary id.
+            temp_id = frame.evaluate("""el => { if(!el.id) el.id='diehl-product-sn-'+Math.random().toString(36).slice(2); return el.id; }""", element)
+            item = frame.locator('#' + temp_id)
+            if item.count() and item.first.is_visible() and item.first.is_enabled():
+                return item.first
     except Exception:
         pass
 
@@ -118,7 +151,7 @@ def open_owl_url(context, url: str, label: str):
     page = context.pages[0] if context.pages else context.new_page()
     log(f'Opening OWL {label}: {url}')
     page.goto(url, wait_until='domcontentloaded', timeout=120_000)
-    page.wait_for_timeout(700)
+    page.wait_for_timeout(1000)
     return page
 
 
@@ -127,7 +160,9 @@ def wait_for_search_page(context, timeout: int = 30):
     while time.time()<deadline:
         for page,frame in frames(context):
             vin_input=find_vin_input(frame)
-            if vin_input is not None: return page,frame,vin_input
+            if vin_input is not None:
+                log(f'Found OWL Product S/N field in frame: {getattr(frame, "url", "") or "[same page]"}')
+                return page,frame,vin_input
         time.sleep(.4)
     raise RuntimeError('OWL page opened, but the main Product S/N field could not be found.')
 
@@ -160,7 +195,7 @@ def submit_vin(context, vin: str):
     vin_input.press('Tab')
     page.wait_for_timeout(1200)
 
-    if 'QuickSearch' in (page.url or '') or re.search(r'Quick\s+Search', body_text(frame), re.I):
+    if 'QuickSearch' in (page.url or ''):
         raise RuntimeError('OWL navigated to Quick Search after Tab; Product S/N focus was not retained.')
 
     previous=''; stable=0; deadline=time.time()+45
