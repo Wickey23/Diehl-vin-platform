@@ -17,9 +17,10 @@ OWL_STATE_DIR = LOCAL_APPDATA / 'DiehlVINWorker' / 'owl'
 LOG_FILE = OWL_STATE_DIR / 'owl_lookup.log'
 RESULT = Path(os.environ.get('DIEHL_RESULT_FILE', str(ROOT / 'vin-results.json')))
 VINS = [x.strip().upper() for x in os.environ.get('DIEHL_VINS', '').splitlines() if x.strip()]
+
 OWL_SIGNON_URL = 'https://secure.freightliner.com/iwarranty/signOn'
-COVERAGE_HANDLER = 'onclickWarrantyDetailsHome'
-MAJOR_HANDLER = 'OnMajorComponentsHome'
+OWL_COVERAGE_URL = 'https://secure.freightliner.com/iwarranty/servlet/com.fourcs.clm.iwarranty.eclaims.dataview.servlets.WarrantyDetailsGoToServlet?FromInd=Home'
+OWL_MAJOR_COMPONENTS_URL = 'https://secure.freightliner.com/iwarranty/servlet/com.fourcs.clm.iwarranty.wc.dataview.servlets.ProductMaintenanceServlet?ActionType=AddNewSideNav&FromInd=SideNav'
 
 
 def log(message: str) -> None:
@@ -110,38 +111,21 @@ def wait_logged_in(context, timeout: int = 240) -> None:
     while time.time()<deadline:
         for page,frame in frames(context):
             text=body_text(frame)
-            try:
-                coverage=frame.evaluate(f"typeof {COVERAGE_HANDLER} === 'function'")
-                major=frame.evaluate(f"typeof {MAJOR_HANDLER} === 'function'")
-            except Exception:
-                coverage=major=False
-            if coverage or major or re.search(r'Coverage\s+Info|Major\s+Components|Online\s+Warranty',text,re.I):
-                log('OWL authenticated home page is ready.')
+            url=(getattr(frame,'url','') or '').lower()
+            if re.search(r'Coverage\s+Info|Major\s+Components|Online\s+Warranty|OWL\s+Home',text,re.I) or '/iwarranty/' in url and 'signon' not in url:
+                log('OWL authenticated session is ready.')
                 return
             inject_hint(page,'Diehl VIN: complete your Freightliner/OWL login and MFA. The worker will continue automatically.')
         time.sleep(1)
     raise RuntimeError('OWL login did not become ready within 4 minutes. Complete login/MFA and retry.')
 
 
-def invoke_owl_section(context, handler: str, link_pattern: str) -> None:
-    for page,frame in frames(context):
-        try:
-            if frame.evaluate(f"typeof {handler} === 'function'"):
-                frame.evaluate(f"{handler}()")
-                page.wait_for_timeout(700)
-                return
-        except Exception:
-            pass
-    for page,frame in frames(context):
-        try:
-            links=frame.get_by_text(re.compile(link_pattern,re.I),exact=False)
-            for i in range(links.count()):
-                item=links.nth(i)
-                if item.is_visible():
-                    item.click(); page.wait_for_timeout(700); return
-        except Exception:
-            pass
-    raise RuntimeError(f'Could not open OWL section: {link_pattern}.')
+def open_owl_url(context, url: str, label: str):
+    page = context.pages[0] if context.pages else context.new_page()
+    log(f'Opening OWL {label}: {url}')
+    page.goto(url, wait_until='domcontentloaded', timeout=120_000)
+    page.wait_for_timeout(700)
+    return page
 
 
 def wait_for_search_page(context, timeout: int = 30):
@@ -208,7 +192,7 @@ def extract_serial_from_rows(rows: list[str], words: list[str]) -> str:
 
 
 def coverage_lookup(context, vin: str) -> dict[str, Any]:
-    invoke_owl_section(context,COVERAGE_HANDLER,r'Coverage\s+Info|Check\s+Coverage')
+    open_owl_url(context, OWL_COVERAGE_URL, 'Coverage Info / Check Coverage')
     page,frame=submit_vin(context,vin); inject_hint(page,f'Diehl VIN: reading Coverage Info for {vin}')
     text=body_text(frame); compact=norm(text)
     if re.search(r'not\s+found|no\s+(vehicle|record|coverage|results?)|invalid\s+(vin|serial)',compact,re.I):
@@ -223,7 +207,7 @@ def coverage_lookup(context, vin: str) -> dict[str, Any]:
 
 
 def major_components_lookup(context, vin: str) -> dict[str, str]:
-    invoke_owl_section(context,MAJOR_HANDLER,r'Major\s+Components')
+    open_owl_url(context, OWL_MAJOR_COMPONENTS_URL, 'Major Components')
     page,frame=submit_vin(context,vin); inject_hint(page,f'Diehl VIN: reading Major Components for {vin}')
     text=body_text(frame); rows=table_rows(frame)
     engine=extract_serial_from_rows(rows,[r'engine']) or labeled(text,[r'Engine\s+Serial(?:\s+Number|\s+No\.?)?',r'Engine\s+S/N'])
