@@ -12,7 +12,6 @@ from typing import Any
 import psutil
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from openpyxl import load_workbook
 
 ROOT = Path(__file__).resolve().parent
 CONFIG = ROOT / 'config.json'
@@ -20,7 +19,7 @@ PORT = 8766
 ALLOWED_SHEETS = ('DTNA', 'VIN In-Service')
 DIEHL_PRODUCTS = {'DiehlVINWorker', 'DiehlVINDatabase'}
 
-app = FastAPI(title='Diehl VIN Database Viewer', version='1.1')
+app = FastAPI(title='Diehl VIN Database Viewer', version='1.2')
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -66,24 +65,129 @@ def serialize(value: Any) -> Any:
     return value if isinstance(value, (str, int, float, bool)) else str(value)
 
 
-def _rows_to_payload(sheet_name: str, path: Path, headers: list[str], rows_iter, limit: int) -> dict[str, Any]:
+def _norm_path(value: str | Path) -> str:
+    try:
+        return os.path.normcase(os.path.abspath(str(value))).rstrip('\\/')
+    except Exception:
+        return str(value).lower().rstrip('\\/')
+
+
+def _find_open_workbook(pythoncom, win32com, destination: Path):
+    exact = []
+    same_name = []
+    seen = set()
+
+    def inspect_app(app):
+        try:
+            count = int(app.Workbooks.Count)
+        except Exception:
+            return
+        for i in range(1, count + 1):
+            try:
+                wb = app.Workbooks.Item(i)
+                name = str(wb.Name or '')
+                full = str(wb.FullName or '')
+                key = (name, full)
+                if key in seen:
+                    continue
+                seen.add(key)
+                if full and _norm_path(full) == _norm_path(destination):
+                    exact.append(wb)
+                elif name.lower() == destination.name.lower():
+                    same_name.append(wb)
+            except Exception:
+                continue
+
+    try:
+        inspect_app(win32com.client.GetActiveObject('Excel.Application'))
+    except Exception:
+        pass
+
+    # Multiple Excel instances may exist. Walk the Running Object Table so the
+    # exact workbook can still be found even when GetActiveObject points at a
+    # different Excel window. OneDrive/SharePoint workbooks may expose an https
+    # FullName, so an unambiguous workbook-name match is also accepted.
+    try:
+        rot = pythoncom.GetRunningObjectTable()
+        enum = rot.EnumRunning()
+        bind = pythoncom.CreateBindCtx(0)
+        while True:
+            monikers = enum.Next(1)
+            if not monikers:
+                break
+            moniker = monikers[0]
+            try:
+                display = moniker.GetDisplayName(bind, None)
+            except Exception:
+                display = ''
+            if 'excel' not in display.lower() and destination.name.lower() not in display.lower():
+                continue
+            try:
+                obj = win32com.client.Dispatch(rot.GetObject(moniker))
+            except Exception:
+                continue
+            try:
+                if hasattr(obj, 'Workbooks'):
+                    inspect_app(obj)
+                elif hasattr(obj, 'Application') and hasattr(obj, 'FullName'):
+                    wb = obj
+                    name = str(wb.Name or '')
+                    full = str(wb.FullName or '')
+                    key = (name, full)
+                    if key not in seen:
+                        seen.add(key)
+                        if full and _norm_path(full) == _norm_path(destination):
+                            exact.append(wb)
+                        elif name.lower() == destination.name.lower():
+                            same_name.append(wb)
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+    if exact:
+        return exact[0]
+
+    unique = []
+    keys = set()
+    for wb in same_name:
+        try:
+            key = (str(wb.Name), str(wb.FullName))
+        except Exception:
+            continue
+        if key not in keys:
+            keys.add(key)
+            unique.append(wb)
+    return unique[0] if len(unique) == 1 else None
+
+
+def _payload_from_com(sheet_name: str, path: Path, ws, limit: int) -> dict[str, Any]:
+    used = ws.UsedRange
+    row_count = max(1, int(used.Rows.Count))
+    col_count = max(1, int(used.Columns.Count))
+    headers = [str(ws.Cells(1, c).Value or '').strip() for c in range(1, col_count + 1)]
     while headers and not headers[-1]:
         headers.pop()
+
     data: list[dict[str, Any]] = []
     total = 0
-    for raw in rows_iter:
-        raw_values = list(raw)
-        if not any(v not in (None, '') for v in raw_values):
+    for r in range(2, row_count + 1):
+        values = [ws.Cells(r, c).Value for c in range(1, len(headers) + 1)]
+        if not any(v not in (None, '') for v in values):
             continue
         total += 1
         if len(data) < limit:
             item: dict[str, Any] = {}
             for i, header in enumerate(headers):
-                if not header:
-                    continue
-                value = raw_values[i] if i < len(raw_values) else None
-                item[header] = serialize(value)
+                if header:
+                    item[header] = serialize(values[i] if i < len(values) else None)
             data.append(item)
+
+    try:
+        modified = path.stat().st_mtime
+    except Exception:
+        modified = 0
+
     return {
         'sheet': sheet_name,
         'workbook': str(path),
@@ -92,25 +196,9 @@ def _rows_to_payload(sheet_name: str, path: Path, headers: list[str], rows_iter,
         'rowCount': total,
         'returned': len(data),
         'exists': True,
-        'modified': path.stat().st_mtime,
+        'modified': modified,
+        'readMode': 'Excel COM',
     }
-
-
-def read_sheet_openpyxl(path: Path, sheet_name: str, limit: int) -> dict[str, Any]:
-    wb = load_workbook(path, read_only=True, data_only=True, keep_vba=path.suffix.lower() == '.xlsm')
-    try:
-        if sheet_name not in wb.sheetnames:
-            return {'sheet': sheet_name, 'workbook': str(path), 'headers': [], 'rows': [], 'rowCount': 0, 'exists': False}
-        ws = wb[sheet_name]
-        rows = ws.iter_rows(values_only=True)
-        try:
-            raw_headers = next(rows)
-        except StopIteration:
-            raw_headers = []
-        headers = [str(x or '').strip() for x in raw_headers]
-        return _rows_to_payload(sheet_name, path, headers, rows, limit)
-    finally:
-        wb.close()
 
 
 def read_sheet_com(path: Path, sheet_name: str, limit: int) -> dict[str, Any]:
@@ -121,43 +209,44 @@ def read_sheet_com(path: Path, sheet_name: str, limit: int) -> dict[str, Any]:
     excel = wb = None
     opened_here = created_excel = False
     try:
-        target = os.path.normcase(os.path.abspath(str(path)))
-        try:
-            excel = win32com.client.GetActiveObject('Excel.Application')
-            for candidate in excel.Workbooks:
-                try:
-                    if os.path.normcase(os.path.abspath(str(candidate.FullName))) == target:
-                        wb = candidate
-                        break
-                except Exception:
-                    pass
-        except Exception:
-            excel = None
-
-        if wb is None:
-            if excel is None:
+        wb = _find_open_workbook(pythoncom, win32com, path)
+        if wb is not None:
+            excel = wb.Application
+        else:
+            # Use Excel itself for the read. Do NOT open the .xlsx with openpyxl;
+            # direct ZIP/file access can lock a OneDrive workbook while desktop
+            # Excel or Power Query is using it.
+            try:
+                excel = win32com.client.GetActiveObject('Excel.Application')
+            except Exception:
                 excel = win32com.client.DispatchEx('Excel.Application')
                 excel.Visible = False
                 excel.DisplayAlerts = False
                 created_excel = True
-            wb = excel.Workbooks.Open(str(path), UpdateLinks=0, ReadOnly=True, IgnoreReadOnlyRecommended=True, AddToMru=False)
+
+            wb = excel.Workbooks.Open(
+                str(path),
+                UpdateLinks=0,
+                ReadOnly=True,
+                IgnoreReadOnlyRecommended=True,
+                AddToMru=False,
+            )
             opened_here = True
 
         try:
             ws = wb.Worksheets(sheet_name)
         except Exception:
-            return {'sheet': sheet_name, 'workbook': str(path), 'headers': [], 'rows': [], 'rowCount': 0, 'exists': False}
+            return {
+                'sheet': sheet_name,
+                'workbook': str(path),
+                'headers': [],
+                'rows': [],
+                'rowCount': 0,
+                'exists': False,
+                'readMode': 'Excel COM',
+            }
 
-        used = ws.UsedRange
-        row_count = max(1, int(used.Rows.Count))
-        col_count = max(1, int(used.Columns.Count))
-        headers = [str(ws.Cells(1, c).Value or '').strip() for c in range(1, col_count + 1)]
-
-        def values():
-            for r in range(2, row_count + 1):
-                yield [ws.Cells(r, c).Value for c in range(1, col_count + 1)]
-
-        return _rows_to_payload(sheet_name, path, headers, values(), limit)
+        return _payload_from_com(sheet_name, path, ws, limit)
     finally:
         try:
             if wb is not None and opened_here:
@@ -178,18 +267,14 @@ def read_sheet(sheet_name: str, limit: int) -> dict[str, Any]:
         raise RuntimeError('Shared Excel database was not found on this computer.')
 
     errors: list[str] = []
-    for attempt in range(3):
+    for attempt in range(1, 7):
         try:
-            return read_sheet_openpyxl(path, sheet_name, limit)
+            return read_sheet_com(path, sheet_name, limit)
         except Exception as exc:
-            errors.append(f'file read: {exc}')
-            try:
-                return read_sheet_com(path, sheet_name, limit)
-            except Exception as com_exc:
-                errors.append(f'Excel read: {com_exc}')
-            if attempt < 2:
+            errors.append(str(exc))
+            if attempt < 6:
                 time.sleep(.5)
-    raise RuntimeError('Could not read the shared Excel database: ' + ' | '.join(errors[-4:]))
+    raise RuntimeError('Could not read the shared Excel database through Excel after 6 attempts: ' + ' | '.join(errors[-3:]))
 
 
 def ping_product(port: int) -> str:
@@ -248,7 +333,7 @@ def _exit_database_service() -> None:
 
 @app.get('/ping')
 def ping():
-    return {'ok': True, 'product': 'DiehlVINDatabase', 'version': '1.1', 'hostname': socket.gethostname()}
+    return {'ok': True, 'product': 'DiehlVINDatabase', 'version': '1.2', 'hostname': socket.gethostname()}
 
 
 @app.get('/database/sheets')
