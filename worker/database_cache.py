@@ -19,8 +19,7 @@ ALLOWED = ('DTNA', 'VIN In-Service')
 
 
 def _cache_path(sheet: str) -> Path:
-    safe = 'dtna' if sheet == 'DTNA' else 'vin-in-service'
-    return CACHE_DIR / f'{safe}.json'
+    return CACHE_DIR / ('dtna.json' if sheet == 'DTNA' else 'vin-in-service.json')
 
 
 def _clean(value: Any) -> Any:
@@ -59,31 +58,37 @@ def write_table(sheet: str, headers: list[str], rows: list[dict[str, Any]], work
         os.replace(temp, target)
 
 
+def vin_mapping() -> dict[str, str]:
+    return {
+        'vin': 'VIN',
+        'verificationStatus': 'Verification Status',
+        'inServiceStatus': 'In-Service Status',
+        'inServiceDate': 'In-Service Date',
+        'mileage': 'Mileage',
+        'customerResult': 'Customer Result',
+        'customerName': 'Customer Name',
+        'registeredCustomerName': 'Registered Customer Name',
+        'registeredCustomerAccount': 'Registered Customer Account',
+        'orderedCustomerName': 'Ordered Customer Name',
+        'warrantyStatus': 'Warranty Status',
+        'warrantyCoverage': 'Warranty / Coverage Details',
+        'engineSerialNumber': 'Engine Serial Number',
+        'allisonTransmissionSerialNumber': 'Allison Transmission Serial Number',
+        'majorComponentsText': 'Major Components Details',
+        'source': 'Source',
+    }
+
+
 def update_vin(vin: str, result: dict[str, Any], workbook: str) -> None:
     sheet = 'VIN In-Service'
     with LOCK:
         current = read_table(sheet, limit=100000, seed=False)
         rows = list(current.get('rows') or []) if current else []
         headers = list(current.get('headers') or []) if current else []
-
-        mapping = {
-            'vin': 'VIN',
-            'verificationStatus': 'Verification Status',
-            'inServiceStatus': 'In-Service Status',
-            'inServiceDate': 'In-Service Date',
-            'mileage': 'Mileage',
-            'customerResult': 'Customer Result',
-            'customerName': 'Customer Name',
-            'registeredCustomerName': 'Registered Customer Name',
-            'registeredCustomerAccount': 'Registered Customer Account',
-            'orderedCustomerName': 'Ordered Customer Name',
-            'source': 'Source',
-        }
-        required = [*mapping.values(), 'Last Updated']
-        for h in required:
-            if h not in headers:
-                headers.append(h)
-
+        mapping = vin_mapping()
+        for header in [*mapping.values(), 'Last Updated']:
+            if header not in headers:
+                headers.append(header)
         target = None
         for row in rows:
             if str(row.get('VIN') or '').strip().upper() == vin.upper():
@@ -92,7 +97,6 @@ def update_vin(vin: str, result: dict[str, Any], workbook: str) -> None:
         if target is None:
             target = {'VIN': vin.upper()}
             rows.append(target)
-
         for key, header in mapping.items():
             value = result.get(key)
             if value not in (None, ''):
@@ -112,7 +116,7 @@ def _seed_dtna() -> bool:
             rows = [dict(row) for row in reader]
         if not headers:
             return False
-        write_table('DTNA', headers, rows, '', 'DTNA -> verified Excel save + local sync output')
+        write_table('DTNA', headers, rows, '', 'DTNA local output from last successful sync')
         return True
     except Exception:
         return False
@@ -131,18 +135,7 @@ def _seed_vin() -> bool:
     if not items:
         return False
     rows_by_vin: dict[str, dict[str, Any]] = {}
-    mapping = {
-        'verificationStatus': 'Verification Status',
-        'inServiceStatus': 'In-Service Status',
-        'inServiceDate': 'In-Service Date',
-        'mileage': 'Mileage',
-        'customerResult': 'Customer Result',
-        'customerName': 'Customer Name',
-        'registeredCustomerName': 'Registered Customer Name',
-        'registeredCustomerAccount': 'Registered Customer Account',
-        'orderedCustomerName': 'Ordered Customer Name',
-        'source': 'Source',
-    }
+    mapping = vin_mapping()
     for item in items:
         try:
             result = json.loads(item['result'])
@@ -151,13 +144,13 @@ def _seed_vin() -> bool:
         vin = str(item['vin'] or '').upper()
         row = {'VIN': vin, 'Last Updated': str(item['completed_at'] or '')}
         for key, header in mapping.items():
-            val = result.get(key)
-            if val not in (None, ''):
-                row[header] = _clean(val)
+            value = result.get(key)
+            if value not in (None, ''):
+                row[header] = _clean(value)
         rows_by_vin[vin] = row
     if not rows_by_vin:
         return False
-    headers = ['VIN', *mapping.values(), 'Last Updated']
+    headers = list(dict.fromkeys(['VIN', *mapping.values(), 'Last Updated']))
     write_table('VIN In-Service', headers, list(rows_by_vin.values()), '', 'Completed OWL results mirror')
     return True
 
@@ -177,15 +170,10 @@ def read_table(sheet: str, limit: int = 10000, seed: bool = True) -> dict[str, A
     if sheet not in ALLOWED:
         raise ValueError(f'Unsupported database sheet: {sheet}')
     target = _cache_path(sheet)
-
-    # DTNA already produces a local CSV only after its Excel-save phase succeeds.
-    # If a newer successful sync exists, rebuild the website mirror from that
-    # local output without opening or attaching to Excel at all.
     if seed and sheet == 'DTNA' and _dtna_mirror_is_stale(target):
         _seed_dtna()
-    elif not target.exists() and seed:
+    elif not target.exists() and seed and sheet == 'VIN In-Service':
         _seed_vin()
-
     if not target.exists():
         return {
             'sheet': sheet,
@@ -201,6 +189,8 @@ def read_table(sheet: str, limit: int = 10000, seed: bool = True) -> dict[str, A
         }
     with LOCK:
         data = json.loads(target.read_text(encoding='utf-8'))
+    if data.get('sheet') != sheet:
+        raise RuntimeError(f'Cache isolation failure: requested {sheet}, cache contains {data.get("sheet")}.')
     rows = list(data.get('rows') or [])
     data['rowCount'] = len(rows)
     data['rows'] = rows[:limit]
