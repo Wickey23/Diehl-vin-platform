@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import socket
+import subprocess
 import threading
 import time
 import urllib.request
@@ -18,8 +19,10 @@ CONFIG = ROOT / 'config.json'
 PORT = 8766
 ALLOWED_SHEETS = ('DTNA', 'VIN In-Service')
 DIEHL_PRODUCTS = {'DiehlVINWorker', 'DiehlVINDatabase'}
+DTNA_RUNTIME = ROOT / 'dtna_runtime.py'
+PROFILE = Path(os.environ.get('LOCALAPPDATA', str(ROOT))) / 'DiehlDTNAManual' / 'browser_profile'
 
-app = FastAPI(title='Diehl VIN Database Viewer', version='1.2')
+app = FastAPI(title='Diehl VIN Database Viewer', version='1.3')
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -103,10 +106,6 @@ def _find_open_workbook(pythoncom, win32com, destination: Path):
     except Exception:
         pass
 
-    # Multiple Excel instances may exist. Walk the Running Object Table so the
-    # exact workbook can still be found even when GetActiveObject points at a
-    # different Excel window. OneDrive/SharePoint workbooks may expose an https
-    # FullName, so an unambiguous workbook-name match is also accepted.
     try:
         rot = pythoncom.GetRunningObjectTable()
         enum = rot.EnumRunning()
@@ -213,9 +212,6 @@ def read_sheet_com(path: Path, sheet_name: str, limit: int) -> dict[str, Any]:
         if wb is not None:
             excel = wb.Application
         else:
-            # Use Excel itself for the read. Do NOT open the .xlsx with openpyxl;
-            # direct ZIP/file access can lock a OneDrive workbook while desktop
-            # Excel or Power Query is using it.
             try:
                 excel = win32com.client.GetActiveObject('Excel.Application')
             except Exception:
@@ -277,6 +273,16 @@ def read_sheet(sheet_name: str, limit: int) -> dict[str, Any]:
     raise RuntimeError('Could not read the shared Excel database through Excel after 6 attempts: ' + ' | '.join(errors[-3:]))
 
 
+def launch_dtna_runtime(args: list[str]) -> None:
+    if not DTNA_RUNTIME.exists():
+        raise HTTPException(500, 'Fixed DTNA runtime is not installed. Download the current worker package.')
+    py = ROOT / '.venv' / 'Scripts' / 'python.exe'
+    if not py.exists():
+        raise HTTPException(500, 'Local Python environment is not ready.')
+    flags = getattr(subprocess, 'CREATE_NEW_CONSOLE', 0)
+    subprocess.Popen([str(py), str(DTNA_RUNTIME), *args], cwd=str(ROOT), creationflags=flags)
+
+
 def ping_product(port: int) -> str:
     try:
         with urllib.request.urlopen(f'http://127.0.0.1:{port}/ping', timeout=1) as response:
@@ -333,7 +339,7 @@ def _exit_database_service() -> None:
 
 @app.get('/ping')
 def ping():
-    return {'ok': True, 'product': 'DiehlVINDatabase', 'version': '1.2', 'hostname': socket.gethostname()}
+    return {'ok': True, 'product': 'DiehlVINDatabase', 'version': '1.3', 'hostname': socket.gethostname()}
 
 
 @app.get('/database/sheets')
@@ -352,9 +358,25 @@ def database_sheet(sheet_name: str, limit: int = Query(default=2000, ge=1, le=10
         raise HTTPException(503, str(exc)) from exc
 
 
+@app.get('/dtna/status')
+def dtna_status():
+    return {'ready': DTNA_RUNTIME.exists(), 'profile': str(PROFILE), 'runtime': str(DTNA_RUNTIME)}
+
+
+@app.post('/dtna/open')
+def dtna_open():
+    launch_dtna_runtime(['--login-only'])
+    return {'ok': True, 'message': 'Fixed DTNA login runtime opened.'}
+
+
+@app.post('/dtna/sync')
+def dtna_sync():
+    launch_dtna_runtime([])
+    return {'ok': True, 'message': 'Fixed DTNA runtime started. Successful sync writes the DTNA sheet.'}
+
+
 @app.post('/control/stop-all')
 def stop_all():
-    """Stop only verified Diehl local services. Never touches Excel, Edge, or unrelated processes."""
     threading.Thread(target=_stop_main_worker, daemon=True).start()
     threading.Thread(target=_exit_database_service, daemon=True).start()
     return {'ok': True, 'message': 'Stopping Diehl worker services on ports 8765 and 8766.'}
