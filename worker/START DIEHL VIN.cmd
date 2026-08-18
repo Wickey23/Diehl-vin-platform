@@ -12,7 +12,7 @@ set "PY312=%LocalAppData%\Programs\Python\Python312\python.exe"
 title Diehl VIN - Setup and Start
 color 0F
 echo ============================================================
-echo  DIEHL VIN - SETUP AND START v5.3
+echo  DIEHL VIN - SETUP AND START v5.4
 echo ============================================================
 echo.
 echo Permanent runtime:
@@ -126,7 +126,7 @@ goto :failed
 :fail_python_install
 echo.
 echo ERROR: Python 3.12 installation failed or was blocked.
-echo If company endpoint security blocked the official installer, contact IT for approval.
+echo If company endpoint security blocked the official Python installer, contact IT for approval.
 goto :failed
 
 :fail_python_missing
