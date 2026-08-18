@@ -12,14 +12,14 @@ set "PY312=%LocalAppData%\Programs\Python\Python312\python.exe"
 title Diehl VIN - Setup and Start
 color 0F
 echo ============================================================
-echo  DIEHL VIN - SETUP AND START v5.4
+echo  DIEHL VIN - SETUP AND START v5.5
 echo ============================================================
 echo.
 echo Permanent runtime:
 echo %INSTALLDIR%
 echo.
-echo This version uses the files already included in the downloaded ZIP.
-echo It does not download worker files during startup.
+echo VIN In-Service source: OWL
+echo DTNA Sales Order/AUTO VIN remains a separate workflow.
 echo.
 
 echo [1/5] Installing packaged Diehl program files...
@@ -30,6 +30,8 @@ call :copy_file "DiehlInitializer.py"
 if errorlevel 1 goto :fail_package
 call :copy_file "service_v4.py"
 if errorlevel 1 goto :fail_package
+call :copy_file "service_v5.py"
+if errorlevel 1 goto :fail_package
 call :copy_file "database_service.py"
 if errorlevel 1 goto :fail_package
 call :copy_file "shared_workbook.py"
@@ -37,6 +39,8 @@ if errorlevel 1 goto :fail_package
 call :copy_file "workbook_organizer.py"
 if errorlevel 1 goto :fail_package
 call :copy_file "vin_lookup.py"
+if errorlevel 1 goto :fail_package
+call :copy_file "owl_lookup.py"
 if errorlevel 1 goto :fail_package
 call :copy_file "dtna_login_and_sync.py"
 if errorlevel 1 goto :fail_package
@@ -85,7 +89,8 @@ if not "%RC%"=="0" goto :fail_initializer
 
 echo.
 echo [5/5] SUCCESS
-echo       Diehl VIN worker and Database viewer are running.
+echo       Diehl VIN v5.5 and Database viewer are running.
+echo       VIN In-Service will open OWL for live lookups.
 echo       The website has been opened.
 echo.
 timeout /t 3 /nobreak >nul
@@ -140,6 +145,7 @@ echo ERROR: Diehl VIN initialization failed with code %RC%.
 echo Read the error printed above.
 echo Main worker log: %INSTALLDIR%\logs\worker.log
 echo Database log: %INSTALLDIR%\logs\database.log
+echo OWL log: %LocalAppData%\DiehlVINWorker\owl\owl_lookup.log
 echo.
 echo If an older Diehl worker is already running, double-click STOP ALL DIEHL.cmd,
 echo then run START DIEHL VIN.cmd again.
