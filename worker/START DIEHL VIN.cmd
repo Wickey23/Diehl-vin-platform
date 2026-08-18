@@ -12,7 +12,7 @@ set "PY312=%LocalAppData%\Programs\Python\Python312\python.exe"
 title Diehl VIN - Setup and Start
 color 0F
 echo ============================================================
-echo  DIEHL VIN - SETUP AND START v5.0
+echo  DIEHL VIN - SETUP AND START v5.1
 echo ============================================================
 echo.
 echo Permanent runtime:
@@ -45,6 +45,8 @@ if errorlevel 1 goto :fail_package
 call :copy_file "requirements.txt"
 if errorlevel 1 goto :fail_package
 call :copy_file "README_LOCAL.txt"
+if errorlevel 1 goto :fail_package
+call :copy_file "STOP ALL DIEHL.cmd"
 if errorlevel 1 goto :fail_package
 
 echo       Packaged program files installed.
@@ -138,6 +140,9 @@ echo ERROR: Diehl VIN initialization failed with code %RC%.
 echo Read the error printed above.
 echo Main worker log: %INSTALLDIR%\logs\worker.log
 echo Database log: %INSTALLDIR%\logs\database.log
+echo.
+echo If an older Diehl worker is already running, double-click STOP ALL DIEHL.cmd,
+echo then run START DIEHL VIN.cmd again.
 goto :failed
 
 :failed
