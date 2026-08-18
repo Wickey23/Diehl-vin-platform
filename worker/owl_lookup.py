@@ -86,26 +86,6 @@ def find_vin_input(frame):
     return None
 
 
-def find_search_button(frame):
-    for pattern in (r'^Search$',r'^Submit$',r'^Lookup$',r'^Find$',r'^Go$',r'Check\s+Coverage',r'Vehicle\s+Search'):
-        for role in ('button','link'):
-            try:
-                loc=frame.get_by_role(role,name=re.compile(pattern,re.I))
-                for i in range(loc.count()):
-                    item=loc.nth(i)
-                    if item.is_visible() and item.is_enabled(): return item
-            except Exception:
-                pass
-    try:
-        loc=frame.locator('input[type="submit"],input[type="button"],button[type="submit"]')
-        for i in range(loc.count()):
-            item=loc.nth(i)
-            if item.is_visible() and item.is_enabled(): return item
-    except Exception:
-        pass
-    return None
-
-
 def wait_logged_in(context, timeout: int = 240) -> None:
     deadline=time.time()+timeout
     while time.time()<deadline:
@@ -141,12 +121,18 @@ def wait_for_search_page(context, timeout: int = 30):
 def submit_vin(context, vin: str):
     page,frame,vin_input=wait_for_search_page(context)
     try:
-        vin_input.click(); vin_input.fill(vin)
+        vin_input.click()
+        vin_input.fill(vin)
     except Exception:
-        page,frame,vin_input=wait_for_search_page(context,10); vin_input.fill(vin)
-    button=find_search_button(frame)
-    if button is not None: button.click()
-    else: vin_input.press('Enter')
+        page,frame,vin_input=wait_for_search_page(context,10)
+        vin_input.fill(vin)
+
+    # OWL validates/populates this legacy form when focus leaves the VIN field.
+    # Do NOT click the binoculars/search icon here. The correct interaction is Tab.
+    log(f'OWL {vin}: VIN entered; pressing Tab to trigger OWL validation.')
+    vin_input.press('Tab')
+    page.wait_for_timeout(1200)
+
     previous=''; stable=0; deadline=time.time()+45
     while time.time()<deadline:
         page.wait_for_timeout(650); current=body_text(frame)
