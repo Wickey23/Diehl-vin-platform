@@ -13,6 +13,7 @@ export default function DatabasePage(){
   const [dataBySheet,setDataBySheet]=useState<Partial<Record<SheetName,Payload>>>({});
   const [query,setQuery]=useState('');
   const [loadingSheet,setLoadingSheet]=useState<SheetName|null>(null);
+  const [openingExcel,setOpeningExcel]=useState(false);
   const [errorBySheet,setErrorBySheet]=useState<Partial<Record<SheetName,string>>>({});
   const [lastRefresh,setLastRefresh]=useState<Partial<Record<SheetName,string>>>({});
   const requestId=useRef(0);
@@ -49,6 +50,20 @@ export default function DatabasePage(){
     }
   }
 
+  async function openExcel(){
+    if(openingExcel)return;
+    setOpeningExcel(true);
+    try{
+      const r=await fetch(`${LOCAL_DB}/database/open-workbook?_=${Date.now()}`,{method:'POST',cache:'no-store',headers:{'Cache-Control':'no-cache','Pragma':'no-cache'}});
+      const payload=await r.json().catch(()=>({}));
+      if(!r.ok)throw new Error(payload.detail||'Could not open the shared Excel workbook.');
+    }catch(e:any){
+      setErrorBySheet(prev=>({...prev,[sheet]:e?.message||'Could not open the shared Excel workbook.'}));
+    }finally{
+      setOpeningExcel(false);
+    }
+  }
+
   useEffect(()=>{void load(sheet);return()=>controller.current?.abort()},[sheet]);
 
   const rows=useMemo(()=>{
@@ -73,9 +88,12 @@ export default function DatabasePage(){
         <h1 style={{fontSize:34,lineHeight:1.1,margin:'0 0 10px'}}>Database</h1>
         <p style={{margin:0,color:'#667085',maxWidth:800}}>Read-only view of <b>DIEHL-VIN-PLATFORM WORKBOOK.xlsx</b>. DTNA and VIN In-Service are kept as separate datasets. The website reads a verified local mirror created only after successful Excel saves, so viewing data cannot lock the workbook.</p>
       </div>
-      <div style={{display:'flex',flexDirection:'column',alignItems:'flex-end',gap:6}}>
-        <button onClick={()=>void load(sheet)} disabled={loading} style={{padding:'11px 18px',borderRadius:10,border:'1px solid #d0d5dd',background:loading?'#f2f4f7':'#fff',fontWeight:700,cursor:loading?'wait':'pointer'}}>{loading?'Refreshing…':'Refresh database'}</button>
-        {lastRefresh[sheet]&&<small style={{color:'#667085'}}>Last refreshed {lastRefresh[sheet]}</small>}
+      <div style={{display:'flex',gap:10,alignItems:'flex-start',flexWrap:'wrap',justifyContent:'flex-end'}}>
+        <button onClick={()=>void openExcel()} disabled={openingExcel} style={{padding:'11px 18px',borderRadius:10,border:'1px solid #98a2b3',background:'#fff',fontWeight:700,cursor:openingExcel?'wait':'pointer'}}>{openingExcel?'Opening Excel…':'Open Excel'}</button>
+        <div style={{display:'flex',flexDirection:'column',alignItems:'flex-end',gap:6}}>
+          <button onClick={()=>void load(sheet)} disabled={loading} style={{padding:'11px 18px',borderRadius:10,border:'1px solid #d0d5dd',background:loading?'#f2f4f7':'#fff',fontWeight:700,cursor:loading?'wait':'pointer'}}>{loading?'Refreshing…':'Refresh database'}</button>
+          {lastRefresh[sheet]&&<small style={{color:'#667085'}}>Last refreshed {lastRefresh[sheet]}</small>}
+        </div>
       </div>
     </section>
 
