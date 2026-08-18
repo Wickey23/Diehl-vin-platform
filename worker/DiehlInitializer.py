@@ -20,10 +20,13 @@ VENV = ROOT / '.venv'
 CONFIG = ROOT / 'config.json'
 REQUIREMENTS = ROOT / 'requirements.txt'
 SITE = 'https://diehl-vin-platform.vercel.app'
-PING = 'http://127.0.0.1:8765/ping'
+WORKER_PING = 'http://127.0.0.1:8765/ping'
+DATABASE_PING = 'http://127.0.0.1:8766/ping'
 LOG_DIR = ROOT / 'logs'
 WORKER_LOG = LOG_DIR / 'worker.log'
+DATABASE_LOG = LOG_DIR / 'database.log'
 SERVICE = ROOT / 'service_v4.py'
+DATABASE_SERVICE = ROOT / 'database_service.py'
 
 
 def venv_python() -> Path:
@@ -111,6 +114,7 @@ def save_config(workbook: Path) -> None:
         'workbookMode': 'shared-onedrive',
         'vinLookupCommand': f'"{py}" "{ROOT / "vin_lookup.py"}"',
         'port': 8765,
+        'databasePort': 8766,
     }, indent=2), encoding='utf-8')
 
 
@@ -123,51 +127,89 @@ def resolve_shared_workbook() -> Path:
     print(f'      Found: {workbook}')
     save_config(workbook)
     print('      Shared workbook bound to this worker.')
-    print('      Sheet creation/organization will happen during actual data writes, not during startup.')
+    print('      Workbook writes happen only when actual DTNA/VIN data is saved.')
     return workbook
 
 
-def ping_worker(timeout: float = 1.0) -> dict | None:
+def ping(url: str, product: str, timeout: float = 1.0) -> dict | None:
     try:
-        with urllib.request.urlopen(PING, timeout=timeout) as response:
+        with urllib.request.urlopen(url, timeout=timeout) as response:
             data = json.loads(response.read().decode('utf-8', errors='replace'))
-        if data.get('ok') and data.get('product') == 'DiehlVINWorker':
+        if data.get('ok') and data.get('product') == product:
             return data
     except Exception:
         pass
     return None
 
 
-def start_worker() -> None:
-    if not SERVICE.exists():
-        raise RuntimeError('service_v4.py is missing. Download a fresh Local Worker package.')
+def spawn_background(script: Path, log_path: Path, label: str) -> subprocess.Popen:
+    if not script.exists():
+        raise RuntimeError(f'{script.name} is missing. Download a fresh Local Worker package.')
     LOG_DIR.mkdir(parents=True, exist_ok=True)
-    log_handle = WORKER_LOG.open('a', encoding='utf-8', buffering=1)
-    log_handle.write(f'\n[{time.strftime("%Y-%m-%d %H:%M:%S")}] Starting Diehl VIN Worker v4\n')
+    handle = log_path.open('a', encoding='utf-8', buffering=1)
+    handle.write(f'\n[{time.strftime("%Y-%m-%d %H:%M:%S")}] Starting {label}\n')
     proc = subprocess.Popen(
-        [str(venv_python()), str(SERVICE)],
+        [str(venv_python()), str(script)],
         cwd=str(ROOT),
         creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
-        stdout=log_handle,
+        stdout=handle,
         stderr=subprocess.STDOUT,
     )
-    deadline = time.time() + 15
+    proc._diehl_log_handle = handle  # type: ignore[attr-defined]
+    return proc
+
+
+def wait_ready(proc: subprocess.Popen, url: str, product: str, log_path: Path, timeout_seconds: int = 15) -> dict:
+    deadline = time.time() + timeout_seconds
     while time.time() < deadline:
         if proc.poll() is not None:
-            log_handle.close()
-            raise RuntimeError(f'Worker exited during startup with code {proc.returncode}. See {WORKER_LOG}.')
-        info = ping_worker(.5)
-        if info and str(info.get('version')) == '4.0':
-            log_handle.close()
-            print('      Local worker connected on 127.0.0.1:8765.')
-            return
+            try:
+                proc._diehl_log_handle.close()  # type: ignore[attr-defined]
+            except Exception:
+                pass
+            raise RuntimeError(f'{product} exited during startup with code {proc.returncode}. See {log_path}.')
+        info = ping(url, product, .5)
+        if info:
+            try:
+                proc._diehl_log_handle.close()  # type: ignore[attr-defined]
+            except Exception:
+                pass
+            return info
         time.sleep(.25)
     try:
         proc.terminate()
     except Exception:
         pass
-    log_handle.close()
-    raise RuntimeError(f'Worker did not become ready. See {WORKER_LOG}.')
+    try:
+        proc._diehl_log_handle.close()  # type: ignore[attr-defined]
+    except Exception:
+        pass
+    raise RuntimeError(f'{product} did not become ready. See {log_path}.')
+
+
+def start_services() -> None:
+    existing = ping(WORKER_PING, 'DiehlVINWorker', .5)
+    if existing:
+        version = str(existing.get('version') or '')
+        if version != '4.1':
+            raise RuntimeError(
+                f'An older Diehl worker (v{version or "unknown"}) is already running on port 8765. '
+                'Close that old Diehl worker before starting this version.'
+            )
+        print('      Main worker already running: v4.1.')
+    else:
+        proc = spawn_background(SERVICE, WORKER_LOG, 'Diehl VIN Worker v4.1')
+        info = wait_ready(proc, WORKER_PING, 'DiehlVINWorker', WORKER_LOG)
+        if str(info.get('version') or '') != '4.1':
+            raise RuntimeError(f'Unexpected worker version started: {info.get("version")}')
+        print('      Local worker connected on 127.0.0.1:8765.')
+
+    if ping(DATABASE_PING, 'DiehlVINDatabase', .5):
+        print('      Database viewer already running.')
+    else:
+        proc = spawn_background(DATABASE_SERVICE, DATABASE_LOG, 'Diehl VIN Database Viewer')
+        wait_ready(proc, DATABASE_PING, 'DiehlVINDatabase', DATABASE_LOG)
+        print('      Database viewer connected on 127.0.0.1:8766.')
 
 
 def show_error(message: str) -> None:
@@ -204,8 +246,8 @@ def main() -> None:
         raise RuntimeError('Verified venv dependencies are no longer available.')
 
     resolve_shared_workbook()
-    print('      Starting local worker...')
-    start_worker()
+    print('      Starting local worker services...')
+    start_services()
     webbrowser.open(SITE)
 
 
