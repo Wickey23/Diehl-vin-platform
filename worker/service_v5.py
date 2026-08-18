@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""Diehl VIN worker v5.5 integration layer.
+"""Diehl VIN worker v5.5 integration layer used by package v5.6.
 
 VIN In-Service always performs a live OWL lookup. A VIN is only marked complete
 after its OWL result is written to and verified in the shared Excel workbook.
@@ -29,16 +29,13 @@ ORIGINAL_RUN_LOOKUP = base.run_lookup
 
 
 def force_live_owl_lookup(_wanted: set[str]):
-    # Never use an existing Excel row as a substitute for a live OWL lookup.
     return {}
 
 
 def validated_owl_lookup(vins: list[str]) -> dict[str, Any]:
-    """Normalize per-VIN OWL failures so the base scheduler marks them error."""
     data = ORIGINAL_RUN_LOOKUP(vins)
     if not isinstance(data, dict):
         return {'_error': 'OWL lookup did not return a valid result payload.'}
-
     global_error = str(data.get('_error') or '').strip()
     out: dict[str, Any] = {}
     errors: list[str] = []
@@ -53,7 +50,6 @@ def validated_owl_lookup(vins: list[str]) -> dict[str, Any]:
             out[vin] = result
         else:
             errors.append(f'{vin}: OWL returned no result.')
-
     if global_error:
         errors.insert(0, global_error)
     if errors:
@@ -79,6 +75,11 @@ def _write_vin_once(vin: str, result: dict[str, Any]) -> None:
         'registeredCustomerName': 'Registered Customer Name',
         'registeredCustomerAccount': 'Registered Customer Account',
         'orderedCustomerName': 'Ordered Customer Name',
+        'warrantyStatus': 'Warranty Status',
+        'warrantyCoverage': 'Warranty / Coverage Details',
+        'engineSerialNumber': 'Engine Serial Number',
+        'allisonTransmissionSerialNumber': 'Allison Transmission Serial Number',
+        'majorComponentsText': 'Major Components Details',
         'source': 'Source',
     }
 
@@ -95,13 +96,7 @@ def _write_vin_once(vin: str, result: dict[str, Any]) -> None:
             created_excel = True
             excel.Visible = False
             excel.DisplayAlerts = False
-            workbook = excel.Workbooks.Open(
-                str(path),
-                UpdateLinks=0,
-                ReadOnly=False,
-                IgnoreReadOnlyRecommended=True,
-                AddToMru=False,
-            )
+            workbook = excel.Workbooks.Open(str(path), UpdateLinks=0, ReadOnly=False, IgnoreReadOnlyRecommended=True, AddToMru=False)
             opened_here = True
             print(f'VIN Excel: opened shared workbook for write: {path}', flush=True)
 
@@ -141,7 +136,6 @@ def _write_vin_once(vin: str, result: dict[str, Any]) -> None:
             if str(ws.Cells(row_num, vin_col).Value or '').strip().upper() == vin.upper():
                 target = row_num
                 break
-
         if target is None:
             target = max(2, last + 1)
             if target > 2:
@@ -161,16 +155,16 @@ def _write_vin_once(vin: str, result: dict[str, Any]) -> None:
         stamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         ws.Cells(target, headers['Last Updated']).Value = stamp
         ws.Cells(target, headers['Updated By']).Value = getpass.getuser()
-
         try:
             ws.Rows(1).Font.Bold = True
             ws.Rows(1).WrapText = True
+            for name in ('Warranty / Coverage Details', 'Major Components Details'):
+                ws.Columns(headers[name]).WrapText = True
+                ws.Columns(headers[name]).ColumnWidth = 40
         except Exception:
             pass
 
         workbook.Save()
-
-        # Verify the same workbook object after Save before allowing completion.
         saved_vin = str(ws.Cells(target, vin_col).Value or '').strip().upper()
         if saved_vin != vin.upper():
             raise RuntimeError(f'Excel save verification failed for VIN {vin}.')
@@ -182,7 +176,6 @@ def _write_vin_once(vin: str, result: dict[str, Any]) -> None:
             if str(actual or '').strip() != str(expected).strip():
                 raise RuntimeError(f'Excel save verification failed for {vin} field {header}.')
 
-        # Only after the canonical Excel save verifies do we refresh the website mirror.
         update_vin(vin, result, str(path))
         print(f'Excel database verified and mirrored: {vin} -> {base.VIN_SHEET}', flush=True)
     finally:
@@ -208,7 +201,6 @@ def _write_vin_once(vin: str, result: dict[str, Any]) -> None:
 def robust_vin_write(vin: str, result: dict[str, Any]) -> None:
     if not isinstance(result, dict) or result.get('_error'):
         raise RuntimeError(str(result.get('_error') if isinstance(result, dict) else 'OWL returned an invalid VIN result.'))
-
     last_error: Exception | None = None
     with base.excel_lock:
         for attempt in range(1, 7):
@@ -230,11 +222,7 @@ base.write_result = robust_vin_write
 
 @base.app.get('/owl/status')
 def owl_status():
-    return {
-        'ready': OWL_LOGIN.exists() and (ROOT / 'owl_lookup.py').exists(),
-        'source': 'OWL',
-        'message': 'VIN In-Service uses live OWL lookups.',
-    }
+    return {'ready': OWL_LOGIN.exists() and (ROOT / 'owl_lookup.py').exists(), 'source': 'OWL', 'message': 'VIN In-Service uses live OWL Coverage Info + Major Components lookups.'}
 
 
 @base.app.post('/owl/open')
