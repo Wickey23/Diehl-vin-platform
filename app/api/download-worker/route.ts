@@ -5,17 +5,19 @@ export const runtime = 'nodejs';
 export const revalidate = 0;
 
 const REPO = 'Wickey23/Diehl-vin-platform';
-const PACKAGE_VERSION = '5.4';
-const PACKAGE_REF = '80ce5c386cb2889a13fd49f042850c87221ef6d8';
+const PACKAGE_VERSION = '5.5';
+const PACKAGE_REF = '93a80200db14d85be60fd1240e36c75c8a300342';
 const FILES = [
   'worker/START DIEHL VIN.cmd',
   'worker/STOP ALL DIEHL.cmd',
   'worker/DiehlInitializer.py',
   'worker/service_v4.py',
+  'worker/service_v5.py',
   'worker/database_service.py',
   'worker/shared_workbook.py',
   'worker/workbook_organizer.py',
   'worker/vin_lookup.py',
+  'worker/owl_lookup.py',
   'worker/dtna_login_and_sync.py',
   'worker/dtna_runtime.py',
   'worker/requirements.txt',
@@ -39,43 +41,37 @@ export async function GET() {
     const launcher = fetched.find(x => x.path.endsWith('START DIEHL VIN.cmd'))?.text || '';
     const stopper = fetched.find(x => x.path.endsWith('STOP ALL DIEHL.cmd'))?.text || '';
     const initializer = fetched.find(x => x.path.endsWith('DiehlInitializer.py'))?.text || '';
-    const runtime = fetched.find(x => x.path.endsWith('dtna_runtime.py'))?.text || '';
+    const serviceV5 = fetched.find(x => x.path.endsWith('service_v5.py'))?.text || '';
+    const owl = fetched.find(x => x.path.endsWith('owl_lookup.py'))?.text || '';
     const vinLookup = fetched.find(x => x.path.endsWith('vin_lookup.py'))?.text || '';
+    const runtime = fetched.find(x => x.path.endsWith('dtna_runtime.py'))?.text || '';
     const database = fetched.find(x => x.path.endsWith('database_service.py'))?.text || '';
 
-    if (!launcher.includes('SETUP AND START v5.4')) throw new Error('Pinned v5.4 launcher verification failed.');
+    if (!launcher.includes('SETUP AND START v5.5')) throw new Error('Pinned v5.5 launcher verification failed.');
     if (!stopper.includes('DIEHL VIN - STOP ALL RUNNING')) throw new Error('Pinned Stop All utility verification failed.');
-    if (!initializer.includes('Database viewer connected on 127.0.0.1:8766')) throw new Error('Pinned initializer verification failed.');
-    if (!runtime.includes('AUTO VIN could not be selected automatically') || !runtime.includes("base.PAYLOAD['orderToReview'] = True") || !runtime.includes('Attached to already-open shared workbook')) {
-      throw new Error('Pinned DTNA runtime verification failed.');
-    }
-    if (!vinLookup.includes("SYNC=ROOT/'dtna_runtime.py'")) throw new Error('Pinned VIN lookup runtime verification failed.');
-    if (!database.includes("version='1.3'") || !database.includes('/control/stop-all') || !database.includes('/dtna/sync') || !database.includes('DTNA_RUNTIME') || database.includes('from openpyxl import load_workbook')) {
-      throw new Error('Pinned unified DTNA/database control verification failed.');
-    }
+    if (!initializer.includes("EXPECTED_WORKER_VERSION = '5.5'") || !initializer.includes("'vinInServiceSource': 'OWL'")) throw new Error('Pinned v5.5 initializer verification failed.');
+    if (!serviceV5.includes("base.VERSION = '5.5'") || !serviceV5.includes('force_live_owl_lookup')) throw new Error('Pinned OWL worker service verification failed.');
+    if (!owl.includes('OWL VIN search did not become ready') || !owl.includes("'source': 'OWL'")) throw new Error('Pinned OWL browser automation verification failed.');
+    if (!vinLookup.includes("OWL = ROOT / 'owl_lookup.py'")) throw new Error('Pinned VIN lookup is not routed to OWL.');
+    if (!runtime.includes('AUTO VIN could not be selected automatically') || !runtime.includes('Attached to already-open shared workbook')) throw new Error('Pinned DTNA runtime verification failed.');
+    if (!database.includes('/control/stop-all') || !database.includes('/dtna/sync') || database.includes('from openpyxl import load_workbook')) throw new Error('Pinned database control verification failed.');
 
     const zip = new JSZip();
-    const folder = zip.folder('Diehl_VIN_Local_Worker_v5_4');
+    const folder = zip.folder('Diehl_VIN_Local_Worker_v5_5');
     if (!folder) throw new Error('Could not create ZIP folder.');
-
     for (const file of fetched) folder.file(file.path.replace(/^worker\//, ''), file.text);
 
     folder.file('PACKAGE VERSION.txt', [
       `Diehl VIN Local Worker ${PACKAGE_VERSION}`,
       `Pinned package revision: ${PACKAGE_REF}`,
-      'Expected launcher banner: DIEHL VIN - SETUP AND START v5.4',
-      'Permanent runtime: %LocalAppData%\\DiehlVINWorker\\v4',
-      'Python runtime: 3.12',
+      'Expected launcher banner: DIEHL VIN - SETUP AND START v5.5',
+      'VIN In-Service source: OWL (live lookup for every submitted VIN)',
+      'DTNA source: Sales Order + Dealer Reporting AUTO VIN',
       'Shared workbook: DIEHL-VIN-PLATFORM WORKBOOK.xlsx',
       'Workbook sheets: VIN In-Service and DTNA',
       'Main worker: 127.0.0.1:8765',
       'Database + DTNA control service: 127.0.0.1:8766',
-      'All website DTNA launches route through dtna_runtime.py.',
-      'STOP ALL DIEHL.cmd safely stops only verified Diehl local services.',
-      'Database viewer reads through Excel COM only and never opens the xlsx directly with openpyxl.',
-      'DTNA Excel writer attaches to an already-open shared workbook and retries OneDrive locks.',
-      'VIN In-Service refresh uses the same fixed DTNA runtime.',
-      'Successful VIN results are written and verified in the shared Excel database.',
+      'Successful VIN results are written and verified in VIN In-Service before completion.',
       `Generated: ${new Date().toISOString()}`,
     ].join('\r\n'));
 
@@ -83,17 +79,14 @@ export async function GET() {
       `DIEHL VIN LOCAL WORKER v${PACKAGE_VERSION}`,
       '',
       '1. Extract the ENTIRE ZIP to a normal folder.',
-      '2. Double-click STOP ALL DIEHL.cmd to stop an older Diehl worker if one is running.',
+      '2. Double-click STOP ALL DIEHL.cmd to stop an older Diehl worker.',
       '3. Double-click START DIEHL VIN.cmd.',
-      '4. The banner must say DIEHL VIN - SETUP AND START v5.4.',
-      '5. START copies the included audited files into LocalAppData\\DiehlVINWorker\\v4.',
-      '6. The worker uses the shared DIEHL-VIN-PLATFORM WORKBOOK.xlsx database.',
-      '7. You may leave the shared workbook open in Excel. Database reads and DTNA writes attach through Excel.',
-      '8. Initialize YOUR DTNA login from the site and complete your own MFA.',
-      '9. DTNA Sync and VIN In-Service both use the same fixed dtna_runtime.py path.',
-      '10. The website Database tab reads DTNA and VIN In-Service through the local Excel COM service.',
-      '',
-      'Successful VIN results are not marked complete until the Excel database write succeeds.',
+      '4. The banner must say DIEHL VIN - SETUP AND START v5.5.',
+      '5. VIN In-Service now performs live OWL lookups. It does NOT use the DTNA Sales Order cache as a substitute.',
+      '6. Complete your own DTNA/OWL login and MFA in the Edge window if prompted.',
+      '7. Each successful OWL result is written to the shared VIN In-Service worksheet and verified before the job is marked complete.',
+      '8. DTNA remains the separate Sales Order + AUTO VIN workflow and writes the DTNA worksheet.',
+      '9. The Database tab is read-only and reflects the shared workbook.',
     ].join('\r\n'));
 
     const body = await zip.generateAsync({type: 'arraybuffer', compression: 'DEFLATE', compressionOptions: {level: 6}});
@@ -101,7 +94,7 @@ export async function GET() {
       status: 200,
       headers: {
         'Content-Type': 'application/zip',
-        'Content-Disposition': 'attachment; filename="Diehl_VIN_Local_Worker_v5_4.zip"',
+        'Content-Disposition': 'attachment; filename="Diehl_VIN_Local_Worker_v5_5.zip"',
         'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
         'Pragma': 'no-cache',
         'Expires': '0',
