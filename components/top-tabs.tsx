@@ -7,6 +7,7 @@ const tabs = [
   { href: '/', label: 'Initializer' },
   { href: '/dtna', label: 'DTNA' },
   { href: '/vin-inservice', label: 'VIN In-Service' },
+  { href: '/database', label: 'Database' },
 ];
 
 export function TopTabs() {
