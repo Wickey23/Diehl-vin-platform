@@ -68,9 +68,6 @@ def inject_hint(page, message: str) -> None:
 
 def find_vin_input(frame):
     """Find the main OWL Product S/N field, never the left-side Quick Search box."""
-    # The live OWL Coverage/Major Components pages label the correct VIN field
-    # as Product S/N:. Scope to that table row first so the sidebar search box
-    # can never be selected accidentally.
     try:
         rows = frame.locator('tr')
         for i in range(rows.count()):
@@ -85,7 +82,6 @@ def find_vin_input(frame):
     except Exception:
         pass
 
-    # Secondary exact-label fallback for alternate OWL markup.
     try:
         labels = frame.get_by_text(re.compile(r'^\s*Product\s+S/N\s*:\s*$', re.I), exact=True)
         for i in range(labels.count()):
@@ -139,7 +135,6 @@ def wait_for_search_page(context, timeout: int = 30):
 def submit_vin(context, vin: str):
     page,frame,vin_input=wait_for_search_page(context)
 
-    # Fill only Product S/N and prove the value is present before allowing Tab.
     for attempt in range(1, 4):
         try:
             vin_input.click()
@@ -156,12 +151,15 @@ def submit_vin(context, vin: str):
             raise RuntimeError(f'OWL Product S/N field did not contain VIN {vin}; refusing to press Tab.')
         page,frame,vin_input=wait_for_search_page(context,10)
 
-    # OWL validates/populates the product when focus leaves Product S/N.
-    log(f'OWL {vin}: Product S/N verified; pressing Tab now.')
+    log(f'OWL {vin}: Product S/N verified; waiting 1 full second before Tab.')
+    page.wait_for_timeout(1000)
+    actual = (vin_input.input_value() or '').strip().upper()
+    if actual != vin:
+        raise RuntimeError(f'OWL Product S/N changed before Tab. Expected {vin}, found {actual or "[blank]"}.')
+    log(f'OWL {vin}: 1 second elapsed and Product S/N still verified; pressing Tab now.')
     vin_input.press('Tab')
     page.wait_for_timeout(1200)
 
-    # Ensure Tab did not unexpectedly navigate to Quick Search.
     if 'QuickSearch' in (page.url or '') or re.search(r'Quick\s+Search', body_text(frame), re.I):
         raise RuntimeError('OWL navigated to Quick Search after Tab; Product S/N focus was not retained.')
 
