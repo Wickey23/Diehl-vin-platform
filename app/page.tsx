@@ -42,13 +42,13 @@ export default function Initializer(){
 
   async function initializeDtna(){
     try{
-      setMessage('Opening DTNA locally. Sign in with YOUR account and complete MFA.');
-      const r=await fetch(`${LOCAL}/dtna/open`,{method:'POST',cache:'no-store'});
+      setMessage('Opening DTNA locally through the fixed runtime. Sign in with YOUR account and complete MFA.');
+      const r=await fetch(`${LOCAL_DB}/dtna/open`,{method:'POST',cache:'no-store'});
       if(!r.ok) throw new Error('Could not open DTNA');
       if(typeof window!=='undefined')localStorage.setItem(LOGIN_KEY,'yes');
       setDtnaReady(true);
       setMessage('DTNA opened. Complete YOUR username/password/MFA in that window. Your session stays local to this Windows user.');
-    }catch{setMessage('Could not open DTNA. Confirm the local worker is running, then try again.')}
+    }catch{setMessage('Could not open DTNA. Confirm the current local worker is running, then try again.')}
   }
 
   async function stopAllRunning(){
