@@ -12,7 +12,7 @@ set "PY312=%LocalAppData%\Programs\Python\Python312\python.exe"
 title Diehl VIN - Setup and Start
 color 0F
 echo ============================================================
-echo  DIEHL VIN - SETUP AND START v4.9
+echo  DIEHL VIN - SETUP AND START v5.0
 echo ============================================================
 echo.
 echo Permanent runtime:
@@ -29,6 +29,8 @@ if errorlevel 1 goto :fail_install
 call :copy_file "DiehlInitializer.py"
 if errorlevel 1 goto :fail_package
 call :copy_file "service_v4.py"
+if errorlevel 1 goto :fail_package
+call :copy_file "database_service.py"
 if errorlevel 1 goto :fail_package
 call :copy_file "shared_workbook.py"
 if errorlevel 1 goto :fail_package
@@ -72,7 +74,7 @@ echo       Python ready: %PYEXE%
 echo.
 
 echo [3/5] Verifying and repairing local environment if needed...
-echo [4/5] Finding shared OneDrive workbook and starting worker...
+echo [4/5] Finding shared OneDrive workbook and starting worker services...
 echo.
 cd /d "%INSTALLDIR%"
 "%PYEXE%" DiehlInitializer.py
@@ -81,7 +83,8 @@ if not "%RC%"=="0" goto :fail_initializer
 
 echo.
 echo [5/5] SUCCESS
-echo       Diehl VIN worker is running and the website has been opened.
+echo       Diehl VIN worker and Database viewer are running.
+echo       The website has been opened.
 echo.
 timeout /t 3 /nobreak >nul
 exit /b 0
@@ -133,7 +136,8 @@ goto :failed
 echo.
 echo ERROR: Diehl VIN initialization failed with code %RC%.
 echo Read the error printed above.
-echo Worker log: %INSTALLDIR%\logs\worker.log
+echo Main worker log: %INSTALLDIR%\logs\worker.log
+echo Database log: %INSTALLDIR%\logs\database.log
 goto :failed
 
 :failed
