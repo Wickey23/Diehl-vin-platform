@@ -67,22 +67,40 @@ def inject_hint(page, message: str) -> None:
 
 
 def find_vin_input(frame):
-    for selector in ('input[placeholder*="VIN" i]','input[aria-label*="VIN" i]','input[name*="vin" i]','input[id*="vin" i]','input[placeholder*="serial" i]','input[aria-label*="serial" i]','input[name*="serial" i]','input[id*="serial" i]'):
-        try:
-            loc=frame.locator(selector)
-            for i in range(loc.count()):
-                item=loc.nth(i)
-                if item.is_visible() and item.is_enabled(): return item
-        except Exception:
-            pass
+    """Find the main OWL Product S/N field, never the left-side Quick Search box."""
+    # The live OWL Coverage/Major Components pages label the correct VIN field
+    # as Product S/N:. Scope to that table row first so the sidebar search box
+    # can never be selected accidentally.
     try:
-        loc=frame.locator('input[type="text"]'); visible=[]
-        for i in range(loc.count()):
-            item=loc.nth(i)
-            if item.is_visible() and item.is_enabled(): visible.append(item)
-        if len(visible)==1: return visible[0]
+        rows = frame.locator('tr')
+        for i in range(rows.count()):
+            row = rows.nth(i)
+            text = re.sub(r'\s+', ' ', row.inner_text(timeout=500) or '').strip()
+            if re.search(r'\bProduct\s+S/N\s*:', text, re.I):
+                inputs = row.locator('input[type="text"], input:not([type])')
+                for j in range(inputs.count()):
+                    item = inputs.nth(j)
+                    if item.is_visible() and item.is_enabled():
+                        return item
     except Exception:
         pass
+
+    # Secondary exact-label fallback for alternate OWL markup.
+    try:
+        labels = frame.get_by_text(re.compile(r'^\s*Product\s+S/N\s*:\s*$', re.I), exact=True)
+        for i in range(labels.count()):
+            label = labels.nth(i)
+            if not label.is_visible():
+                continue
+            row = label.locator('xpath=ancestor::tr[1]')
+            inputs = row.locator('input[type="text"], input:not([type])')
+            for j in range(inputs.count()):
+                item = inputs.nth(j)
+                if item.is_visible() and item.is_enabled():
+                    return item
+    except Exception:
+        pass
+
     return None
 
 
@@ -115,23 +133,37 @@ def wait_for_search_page(context, timeout: int = 30):
             vin_input=find_vin_input(frame)
             if vin_input is not None: return page,frame,vin_input
         time.sleep(.4)
-    raise RuntimeError('OWL page opened, but its VIN/serial search box could not be found.')
+    raise RuntimeError('OWL page opened, but the main Product S/N field could not be found.')
 
 
 def submit_vin(context, vin: str):
     page,frame,vin_input=wait_for_search_page(context)
-    try:
-        vin_input.click()
-        vin_input.fill(vin)
-    except Exception:
-        page,frame,vin_input=wait_for_search_page(context,10)
-        vin_input.fill(vin)
 
-    # OWL validates/populates this legacy form when focus leaves the VIN field.
-    # Do NOT click the binoculars/search icon here. The correct interaction is Tab.
-    log(f'OWL {vin}: VIN entered; pressing Tab to trigger OWL validation.')
+    # Fill only Product S/N and prove the value is present before allowing Tab.
+    for attempt in range(1, 4):
+        try:
+            vin_input.click()
+            vin_input.fill('')
+            vin_input.type(vin, delay=35)
+            page.wait_for_timeout(250)
+            actual = (vin_input.input_value() or '').strip().upper()
+            log(f'OWL {vin}: Product S/N fill attempt {attempt}; field contains {actual or "[blank]"}.')
+            if actual == vin:
+                break
+        except Exception:
+            actual = ''
+        if attempt == 3:
+            raise RuntimeError(f'OWL Product S/N field did not contain VIN {vin}; refusing to press Tab.')
+        page,frame,vin_input=wait_for_search_page(context,10)
+
+    # OWL validates/populates the product when focus leaves Product S/N.
+    log(f'OWL {vin}: Product S/N verified; pressing Tab now.')
     vin_input.press('Tab')
     page.wait_for_timeout(1200)
+
+    # Ensure Tab did not unexpectedly navigate to Quick Search.
+    if 'QuickSearch' in (page.url or '') or re.search(r'Quick\s+Search', body_text(frame), re.I):
+        raise RuntimeError('OWL navigated to Quick Search after Tab; Product S/N focus was not retained.')
 
     previous=''; stable=0; deadline=time.time()+45
     while time.time()<deadline:
