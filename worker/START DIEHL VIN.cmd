@@ -12,7 +12,7 @@ set "PY312=%LocalAppData%\Programs\Python\Python312\python.exe"
 title Diehl VIN - Setup and Start
 color 0F
 echo ============================================================
-echo  DIEHL VIN - SETUP AND START v4.8
+echo  DIEHL VIN - SETUP AND START v4.9
 echo ============================================================
 echo.
 echo Permanent runtime:
@@ -37,6 +37,8 @@ if errorlevel 1 goto :fail_package
 call :copy_file "vin_lookup.py"
 if errorlevel 1 goto :fail_package
 call :copy_file "dtna_login_and_sync.py"
+if errorlevel 1 goto :fail_package
+call :copy_file "dtna_runtime.py"
 if errorlevel 1 goto :fail_package
 call :copy_file "requirements.txt"
 if errorlevel 1 goto :fail_package
@@ -70,7 +72,7 @@ echo       Python ready: %PYEXE%
 echo.
 
 echo [3/5] Verifying and repairing local environment if needed...
-echo [4/5] Finding shared OneDrive workbook, organizing sheets, and starting worker...
+echo [4/5] Finding shared OneDrive workbook and starting worker...
 echo.
 cd /d "%INSTALLDIR%"
 "%PYEXE%" DiehlInitializer.py
@@ -119,7 +121,7 @@ goto :failed
 :fail_python_install
 echo.
 echo ERROR: Python 3.12 installation failed or was blocked.
-echo If company endpoint security blocked the official Python installer, contact IT for approval.
+echo If company endpoint security blocked the official installer, contact IT for approval.
 goto :failed
 
 :fail_python_missing
