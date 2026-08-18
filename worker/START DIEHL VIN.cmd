@@ -12,7 +12,7 @@ set "PY312=%LocalAppData%\Programs\Python\Python312\python.exe"
 title Diehl VIN - Setup and Start
 color 0F
 echo ============================================================
-echo  DIEHL VIN - SETUP AND START v5.2
+echo  DIEHL VIN - SETUP AND START v5.3
 echo ============================================================
 echo.
 echo Permanent runtime:
