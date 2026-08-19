@@ -63,8 +63,13 @@ def vin_mapping() -> dict[str, str]:
         'vin': 'VIN',
         'verificationStatus': 'Verification Status',
         'productSerialNumber': 'Product Serial Number',
+        'chassisSerialNumber': 'Chassis Serial Number',
         'vehicleModel': 'Vehicle Model',
         'buildDate': 'Build Date',
+        'unitNumber': 'Unit Number',
+        'vocation': 'Vocation',
+        'wheelbase': 'Wheelbase',
+        'gvwr': 'GVW',
         'inServiceStatus': 'In-Service Status',
         'inServiceDate': 'In-Service Date',
         'mileage': 'Mileage',
@@ -79,8 +84,10 @@ def vin_mapping() -> dict[str, str]:
         'coverageFieldsJson': 'Coverage Fields JSON',
         'engineSerialNumber': 'Engine Serial Number',
         'engineModel': 'Engine Model',
+        'engineManufacturer': 'Engine Manufacturer',
         'allisonTransmissionSerialNumber': 'Allison Transmission Serial Number',
         'transmissionModel': 'Transmission Model',
+        'transmissionManufacturer': 'Transmission Manufacturer',
         'majorComponentsText': 'Major Components Details',
         'majorComponentsJson': 'Major Components JSON',
         'majorComponentFieldsJson': 'Major Component Fields JSON',
@@ -112,7 +119,7 @@ def update_vin(vin: str, result: dict[str, Any], workbook: str) -> None:
                 target[header] = _clean(value)
         target['VIN'] = vin.upper()
         target['Last Updated'] = time.strftime('%Y-%m-%d %H:%M:%S')
-        write_table(sheet, headers, rows, workbook, 'OWL -> verified Excel save')
+        write_table(sheet, headers, rows, workbook, 'OWL exact-field mapper -> verified Excel save')
 
 
 def _seed_dtna() -> bool:
