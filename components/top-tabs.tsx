@@ -11,15 +11,15 @@ const tabs = [
   { href: '/database', label: 'Database' },
 ];
 
-const LATEST_WORKER_VERSION = '5.10';
-const LATEST_WORKER_UPDATED = '08/19/2026 11:22 AM ET';
+const LATEST_WORKER_VERSION = '5.11';
+const LATEST_WORKER_UPDATED = '08/19/2026 11:38 AM ET';
 const RELEASE_NOTES = [
-  'VIN In-Service now validates that OWL is showing the exact submitted VIN before accepting results.',
-  'Coverage Info collection now captures in-service status/date, mileage, customer/account, model, build date, warranty status, and structured coverage rows.',
-  'Major Components collection now captures engine serial/model, Allison transmission serial/model, and structured component rows.',
-  'OWL results are written to Excel and read back for verification before the VIN is marked complete.',
-  'Additional OWL audit data is preserved in Excel so collected details are not lost.',
-  'Database DTNA and VIN In-Service views remain isolated, and the viewer does not lock the live workbook.',
+  'Fixed OWL VIN entry so the worker will never use the left Quick Search box.',
+  'The worker now accepts only the main-content Product S/N input and verifies its screen position before typing.',
+  'VIN entry is typed, verified, held for one full second, verified again, then Tab is pressed.',
+  'Fixed the startup version check that caused v5.10 to fail with “Unexpected worker version started”.',
+  'Coverage Info and Major Components must each confirm the submitted VIN before any result is accepted.',
+  'In-service, warranty, customer, engine, Allison, model and structured OWL audit data are still written and verified in Excel.',
 ];
 
 export function TopTabs() {
@@ -123,7 +123,7 @@ export function TopTabs() {
             </div>
 
             <div style={{padding:'18px 22px 8px'}}>
-              <p style={{margin:'0 0 12px',color:'#475467',fontSize:14}}>This worker update improves VIN In-Service accuracy and keeps the Excel/database handoff safer and more complete.</p>
+              <p style={{margin:'0 0 12px',color:'#475467',fontSize:14}}>This update fixes the OWL VIN-entry target and startup version mismatch, while keeping the stricter VIN verification and complete Excel capture.</p>
               <ul style={{margin:'0 0 8px',paddingLeft:22,color:'#344054',fontSize:14,lineHeight:1.55}}>
                 {RELEASE_NOTES.map((note) => <li key={note} style={{marginBottom:8}}>{note}</li>)}
               </ul>
