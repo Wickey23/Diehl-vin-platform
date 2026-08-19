@@ -6,7 +6,7 @@ export const revalidate = 0;
 
 const REPO = 'Wickey23/Diehl-vin-platform';
 const PACKAGE_VERSION = '5.12';
-const PACKAGE_REF = 'f35605fb8154730fb1110ee44061c7f3703c0331';
+const PACKAGE_REF = '99829ba7a519e556e9c6e109ba27430de59d6980';
 const FILES = [
   'worker/START DIEHL VIN.cmd',
   'worker/STOP ALL DIEHL.cmd',
@@ -60,9 +60,11 @@ export async function GET() {
     if (!stopper.includes('service_v5\\.py') || !stopper.includes('DIEHL VIN - STOP ALL RUNNING')) throw new Error('Pinned Stop All utility verification failed.');
     if (!initializer.includes("EXPECTED_WORKER_VERSION = '5.12'")) throw new Error('Pinned initializer worker-version verification failed.');
     if (!serviceV5.includes("base.VERSION = '5.12'") || !serviceV5.includes('owl_lookup_v3.py') || !serviceV5.includes('Engine Manufacturer')) throw new Error('Pinned v5.12 worker service verification failed.');
-    if (!owlFast.includes('MIN_MAIN_X = 220') || !owlFast.includes('No fixed one-second delay') || !owlFast.includes("field.press('Tab')")) throw new Error('Pinned fast Product S/N flow verification failed.');
+    if (!owlFast.includes('MIN_MAIN_X = 220') || !owlFast.includes("field.press('Tab')") || !owlFast.includes('main_signature')) throw new Error('Pinned fast Product S/N flow verification failed.');
+    if (owlFast.includes('wait_for_timeout(1000)')) throw new Error('Pinned OWL v5.12 still contains the removed fixed one-second wait.');
     if (!owlFast.includes("exact_label_value(frame, ['In Service Date'])") || !owlFast.includes("exact_table(frame, ['Component', 'MFG', 'Model', 'Component S/N'])")) throw new Error('Pinned exact OWL field mapping verification failed.');
-    if (!owlFast.includes("record_value(row, 'Component S/N')") || !owlFast.includes("component == 'ENGINE'")) throw new Error('Pinned exact Major Components serial mapping verification failed.');
+    if (!owlFast.includes("row_field(engine_row, 'Component S/N')") || !owlFast.includes("component == 'ENGINE'")) throw new Error('Pinned exact Major Components serial mapping verification failed.');
+    if (!owlFast.includes('sig != before_signature') || !owlFast.includes('stable_since')) throw new Error('Pinned OWL result wait is not based on actual main-form data changes.');
     if (!owlLogin.includes("OWL_URL = 'https://secure.freightliner.com/iwarranty/signOn'")) throw new Error('Pinned OWL login URL verification failed.');
     if (!vinLookup.includes("OWL = ROOT / 'owl_lookup_v3.py'")) throw new Error('Pinned VIN lookup is not routed to exact OWL v3.');
     if (!runtime.includes('AUTO VIN could not be selected automatically') || !runtime.includes('Attached to already-open shared workbook')) throw new Error('Pinned DTNA runtime verification failed.');
@@ -81,8 +83,8 @@ export async function GET() {
       `Pinned package revision: ${PACKAGE_REF}`,
       'Expected launcher banner: DIEHL VIN - SETUP AND START v5.12',
       'VIN In-Service is faster: no fixed one-second delay after Product S/N entry.',
-      'OWL waits on actual returned page data instead of arbitrary sleeps.',
-      'Coverage Info uses exact labeled cells only; unknown fields remain blank rather than guessed.',
+      'OWL waits for a real main-form DOM/value change after Tab instead of treating the VIN input itself as a result.',
+      'Coverage Info uses exact labeled cells only; unknown fields stay blank rather than being guessed.',
       'Major Components uses exact Component / MFG / Model / Component S/N columns.',
       'ENGINE serial comes only from Component S/N on the ENGINE row.',
       'Allison serial comes only from Component S/N on an ALLISON/TRANSMISSION row.',
@@ -102,10 +104,11 @@ export async function GET() {
       '3. Double-click START DIEHL VIN.cmd.',
       '4. The launcher banner must say v5.12.',
       '5. VIN In-Service uses only the main OWL Product S/N box and ignores Quick Search.',
-      '6. The VIN is verified in the box and Tab is sent immediately; there is no fixed one-second delay.',
-      '7. OWL field values are accepted only from exact labels/tables. If a field is not mapped exactly it stays blank.',
-      '8. ENGINE and Allison serial numbers are read only from the Major Components Component S/N column.',
-      '9. Successful results are written and verified in the VIN In-Service worksheet.',
+      '6. VIN is verified in the box and Tab is sent immediately; no fixed one-second delay.',
+      '7. The worker waits until OWL actually changes/populates main-form data before reading fields.',
+      '8. Field values are accepted only from exact labels/tables. If a field is not mapped exactly it stays blank.',
+      '9. ENGINE and Allison serials are read only from Major Components -> Component S/N.',
+      '10. Successful results are written and verified in the VIN In-Service worksheet.',
     ].join('\r\n'));
 
     const body = await zip.generateAsync({type: 'arraybuffer', compression: 'DEFLATE', compressionOptions: {level: 6}});
