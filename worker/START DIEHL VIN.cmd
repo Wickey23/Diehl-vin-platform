@@ -12,13 +12,13 @@ set "PY312=%LocalAppData%\Programs\Python\Python312\python.exe"
 title Diehl VIN - Setup and Start
 color 0F
 echo ============================================================
-echo  DIEHL VIN - SETUP AND START v5.9
+echo  DIEHL VIN - SETUP AND START v5.10
 echo ============================================================
 echo.
 echo Permanent runtime:
 echo %INSTALLDIR%
 echo.
-echo VIN In-Service source: OWL Coverage Info + Major Components
+echo VIN In-Service: verified OWL Coverage Info + Major Components
 echo DTNA Sales Order/AUTO VIN remains a separate workflow.
 echo Database viewer uses a lock-free verified Excel mirror.
 echo Database Open Excel activates the exact shared workbook.
@@ -97,8 +97,8 @@ if not "%RC%"=="0" goto :fail_initializer
 
 echo.
 echo [5/5] SUCCESS
-echo       Diehl VIN v5.9 and Database viewer are running.
-echo       VIN In-Service uses OWL Coverage Info + Major Components.
+echo       Diehl VIN v5.10 and Database viewer are running.
+echo       VIN In-Service verifies VIN identity on both OWL pages before saving.
 echo       The website has been opened.
 echo.
 timeout /t 3 /nobreak >nul
