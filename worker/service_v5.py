@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-"""Diehl VIN worker v5.5 integration layer used by package v5.6.
+"""Diehl VIN worker v5 integration layer.
 
 VIN In-Service always performs a live OWL lookup. A VIN is only marked complete
-after its OWL result is written to and verified in the shared Excel workbook.
-The website Database tab is updated from a lock-free mirror after that verified
-Excel save; the mirror is never treated as the source of truth for writes.
+after OWL verifies that both Coverage Info and Major Components belong to the
+submitted VIN, then the normalized result is written to and verified in the
+shared Excel workbook. Raw structured OWL records are also retained for audit.
 """
 
 import getpass
@@ -22,7 +22,7 @@ import service_v4 as base
 from database_cache import update_vin
 from excel_bridge import collect_open_workbook
 
-base.VERSION = '5.5'
+base.VERSION = '5.10'
 ROOT = Path(__file__).resolve().parent
 OWL_LOGIN = ROOT / 'owl_login.py'
 ORIGINAL_RUN_LOOKUP = base.run_lookup
@@ -45,8 +45,12 @@ def validated_owl_lookup(vins: list[str]) -> dict[str, Any]:
             errors.append(f'{vin}: {result.get("_error")}')
             continue
         if isinstance(result, dict) and result:
+            status = str(result.get('verificationStatus') or '').strip()
+            if status not in {'Verified', 'Not Found'}:
+                errors.append(f'{vin}: OWL did not return a trusted verification state.')
+                continue
             result.setdefault('vin', vin)
-            result.setdefault('source', 'OWL')
+            result.setdefault('source', 'OWL Coverage Info + Major Components')
             out[vin] = result
         else:
             errors.append(f'{vin}: OWL returned no result.')
@@ -67,6 +71,9 @@ def _write_vin_once(vin: str, result: dict[str, Any]) -> None:
 
     mapping = {
         'verificationStatus': 'Verification Status',
+        'productSerialNumber': 'Product Serial Number',
+        'vehicleModel': 'Vehicle Model',
+        'buildDate': 'Build Date',
         'inServiceStatus': 'In-Service Status',
         'inServiceDate': 'In-Service Date',
         'mileage': 'Mileage',
@@ -77,9 +84,15 @@ def _write_vin_once(vin: str, result: dict[str, Any]) -> None:
         'orderedCustomerName': 'Ordered Customer Name',
         'warrantyStatus': 'Warranty Status',
         'warrantyCoverage': 'Warranty / Coverage Details',
+        'coverageRecordsJson': 'Coverage Records JSON',
+        'coverageFieldsJson': 'Coverage Fields JSON',
         'engineSerialNumber': 'Engine Serial Number',
+        'engineModel': 'Engine Model',
         'allisonTransmissionSerialNumber': 'Allison Transmission Serial Number',
+        'transmissionModel': 'Transmission Model',
         'majorComponentsText': 'Major Components Details',
+        'majorComponentsJson': 'Major Components JSON',
+        'majorComponentFieldsJson': 'Major Component Fields JSON',
         'source': 'Source',
     }
 
@@ -155,19 +168,28 @@ def _write_vin_once(vin: str, result: dict[str, Any]) -> None:
         stamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         ws.Cells(target, headers['Last Updated']).Value = stamp
         ws.Cells(target, headers['Updated By']).Value = getpass.getuser()
+
         try:
             ws.Rows(1).Font.Bold = True
             ws.Rows(1).WrapText = True
             for name in ('Warranty / Coverage Details', 'Major Components Details'):
                 ws.Columns(headers[name]).WrapText = True
-                ws.Columns(headers[name]).ColumnWidth = 40
+                ws.Columns(headers[name]).ColumnWidth = 42
+            for name in ('Coverage Records JSON', 'Coverage Fields JSON', 'Major Components JSON', 'Major Component Fields JSON'):
+                ws.Columns(headers[name]).Hidden = True
+            for name in ('VIN', 'Product Serial Number', 'Engine Serial Number', 'Allison Transmission Serial Number'):
+                ws.Columns(headers[name]).ColumnWidth = 22
+            for name in ('Vehicle Model', 'Engine Model', 'Transmission Model', 'Customer Name'):
+                ws.Columns(headers[name]).ColumnWidth = 26
         except Exception:
             pass
 
         workbook.Save()
+
         saved_vin = str(ws.Cells(target, vin_col).Value or '').strip().upper()
         if saved_vin != vin.upper():
             raise RuntimeError(f'Excel save verification failed for VIN {vin}.')
+
         for key, header in mapping.items():
             expected = result.get(key)
             if expected in (None, ''):
@@ -222,7 +244,12 @@ base.write_result = robust_vin_write
 
 @base.app.get('/owl/status')
 def owl_status():
-    return {'ready': OWL_LOGIN.exists() and (ROOT / 'owl_lookup.py').exists(), 'source': 'OWL', 'message': 'VIN In-Service uses live OWL Coverage Info + Major Components lookups.'}
+    return {
+        'ready': OWL_LOGIN.exists() and (ROOT / 'owl_lookup.py').exists(),
+        'source': 'OWL Coverage Info + Major Components',
+        'version': base.VERSION,
+        'message': 'VIN In-Service verifies the VIN on both OWL pages, then writes the complete normalized result to Excel.',
+    }
 
 
 @base.app.post('/owl/open')
