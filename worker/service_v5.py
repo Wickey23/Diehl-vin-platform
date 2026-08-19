@@ -22,7 +22,7 @@ import service_v4 as base
 from database_cache import update_vin
 from excel_bridge import collect_open_workbook
 
-base.VERSION = '5.11'
+base.VERSION = '5.12'
 ROOT = Path(__file__).resolve().parent
 OWL_LOGIN = ROOT / 'owl_login.py'
 ORIGINAL_RUN_LOOKUP = base.run_lookup
@@ -72,8 +72,13 @@ def _write_vin_once(vin: str, result: dict[str, Any]) -> None:
     mapping = {
         'verificationStatus': 'Verification Status',
         'productSerialNumber': 'Product Serial Number',
+        'chassisSerialNumber': 'Chassis Serial Number',
         'vehicleModel': 'Vehicle Model',
         'buildDate': 'Build Date',
+        'unitNumber': 'Unit Number',
+        'vocation': 'Vocation',
+        'wheelbase': 'Wheelbase',
+        'gvwr': 'GVW',
         'inServiceStatus': 'In-Service Status',
         'inServiceDate': 'In-Service Date',
         'mileage': 'Mileage',
@@ -88,8 +93,10 @@ def _write_vin_once(vin: str, result: dict[str, Any]) -> None:
         'coverageFieldsJson': 'Coverage Fields JSON',
         'engineSerialNumber': 'Engine Serial Number',
         'engineModel': 'Engine Model',
+        'engineManufacturer': 'Engine Manufacturer',
         'allisonTransmissionSerialNumber': 'Allison Transmission Serial Number',
         'transmissionModel': 'Transmission Model',
+        'transmissionManufacturer': 'Transmission Manufacturer',
         'majorComponentsText': 'Major Components Details',
         'majorComponentsJson': 'Major Components JSON',
         'majorComponentFieldsJson': 'Major Component Fields JSON',
@@ -177,7 +184,7 @@ def _write_vin_once(vin: str, result: dict[str, Any]) -> None:
                 ws.Columns(headers[name]).ColumnWidth = 42
             for name in ('Coverage Records JSON', 'Coverage Fields JSON', 'Major Components JSON', 'Major Component Fields JSON'):
                 ws.Columns(headers[name]).Hidden = True
-            for name in ('VIN', 'Product Serial Number', 'Engine Serial Number', 'Allison Transmission Serial Number'):
+            for name in ('VIN', 'Product Serial Number', 'Chassis Serial Number', 'Engine Serial Number', 'Allison Transmission Serial Number'):
                 ws.Columns(headers[name]).ColumnWidth = 22
             for name in ('Vehicle Model', 'Engine Model', 'Transmission Model', 'Customer Name'):
                 ws.Columns(headers[name]).ColumnWidth = 26
@@ -233,7 +240,7 @@ def robust_vin_write(vin: str, result: dict[str, Any]) -> None:
                 last_error = exc
                 if attempt < 6:
                     print(f'VIN Excel write attempt {attempt}/6 failed for {vin}: {exc}; retrying...', flush=True)
-                    time.sleep(2)
+                    time.sleep(.5)
     raise RuntimeError(f'Could not write VIN {vin} to shared Excel database after 6 attempts: {last_error}')
 
 
@@ -245,10 +252,10 @@ base.write_result = robust_vin_write
 @base.app.get('/owl/status')
 def owl_status():
     return {
-        'ready': OWL_LOGIN.exists() and (ROOT / 'owl_lookup_v2.py').exists(),
+        'ready': OWL_LOGIN.exists() and (ROOT / 'owl_lookup_v3.py').exists(),
         'source': 'OWL Coverage Info + Major Components',
         'version': base.VERSION,
-        'message': 'VIN In-Service uses the strict main-content Product S/N field, verifies the VIN on both OWL pages, then writes the complete result to Excel.',
+        'message': 'VIN In-Service uses exact OWL labels and exact Major Components columns; no fuzzy page-text mapping.',
     }
 
 
