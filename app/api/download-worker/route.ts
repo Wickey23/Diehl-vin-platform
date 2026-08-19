@@ -5,8 +5,8 @@ export const runtime = 'nodejs';
 export const revalidate = 0;
 
 const REPO = 'Wickey23/Diehl-vin-platform';
-const PACKAGE_VERSION = '5.15';
-const PACKAGE_REF = 'ad01b92bc1befe96171fe2a4fe6f21ad023fc8c8';
+const PACKAGE_VERSION = '5.16';
+const PACKAGE_REF = '13eaa75ce1c6c9535908addbb6da129ecb3cf2c8';
 const FILES = [
   'worker/START DIEHL VIN.cmd',
   'worker/STOP ALL DIEHL.cmd',
@@ -61,11 +61,13 @@ export async function GET() {
     const cache = get('database_cache.py');
     const excelBridge = get('excel_bridge.py');
 
-    if (!launcher.includes('SETUP AND START v5.15') || !launcher.includes('service_v7.py')) throw new Error('Pinned v5.15 launcher verification failed.');
-    if (!launcher.includes('stale queued/running batches')) throw new Error('Pinned launcher does not include stale-batch OWL start fix.');
+    if (!launcher.includes('SETUP AND START v5.16') || !launcher.includes('service_v7.py')) throw new Error('Pinned v5.16 launcher verification failed.');
+    if (!launcher.includes('launches the new VIN batch immediately')) throw new Error('Pinned launcher does not document immediate OWL execution.');
     if (!stopper.includes('service_v5\\.py') || !stopper.includes('DIEHL VIN - STOP ALL RUNNING')) throw new Error('Pinned Stop All utility verification failed.');
-    if (!initializer.includes("EXPECTED_WORKER_VERSION = '5.15'") || !initializer.includes('base.webbrowser.open = lambda')) throw new Error('Pinned v5.15 initializer verification failed.');
-    if (!serviceV7.includes("service.base.VERSION = '5.15'") || !serviceV7.includes('Superseded by a newer VIN run.')) throw new Error('Pinned v5.15 fresh-batch service verification failed.');
+    if (!initializer.includes("EXPECTED_WORKER_VERSION = '5.16'") || !initializer.includes('base.webbrowser.open = lambda')) throw new Error('Pinned v5.16 initializer verification failed.');
+    if (!serviceV7.includes("service.base.VERSION = '5.16'")) throw new Error('Pinned v5.16 service version verification failed.');
+    if (!serviceV7.includes('_process_batch_now') || !serviceV7.includes("status='direct_running'") || !serviceV7.includes('threading.Thread')) throw new Error('Pinned v5.16 immediate batch execution verification failed.');
+    if (!serviceV7.includes('DIRECT START') || !serviceV7.includes('Launch') && !serviceV7.includes('Launching OWL now')) throw new Error('Pinned v5.16 OWL launch logging verification failed.');
     if (!owlConfirmed.includes("['Chassis S/N']") || !owlConfirmed.includes("component == 'MAIN TRANSMISSION'")) throw new Error('Pinned exact Major Components mapping verification failed.');
     if (!owlConfirmed.includes("component == 'ENGINE'") || !owlConfirmed.includes("'ALI', 'ALLISON'")) throw new Error('Pinned Cummins/Allison row mapping verification failed.');
     if (!owlExact.includes("['In Service Distance']") || !owlExact.includes('product_registration_lookup')) throw new Error('Pinned Coverage/Product Registration mapping verification failed.');
@@ -79,14 +81,16 @@ export async function GET() {
     if (!excelBridge.includes('collect_open_workbook') || !excelBridge.includes('GetRunningObjectTable')) throw new Error('Pinned Excel bridge verification failed.');
 
     const zip = new JSZip();
-    const folder = zip.folder('Diehl_VIN_Local_Worker_v5_15');
+    const folder = zip.folder('Diehl_VIN_Local_Worker_v5_16');
     if (!folder) throw new Error('Could not create ZIP folder.');
     for (const file of fetched) folder.file(file.path.replace(/^worker\//, ''), file.text);
 
     folder.file('PACKAGE VERSION.txt', [
       `Diehl VIN Local Worker ${PACKAGE_VERSION}`,
       `Pinned package revision: ${PACKAGE_REF}`,
-      'New VIN runs retire stale queued/running batches so the latest OWL check starts immediately instead of sitting at 0%.',
+      'Start OWL Check now starts the submitted VIN batch immediately in a dedicated local thread instead of waiting for the legacy scheduler.',
+      'The VIN item is marked running immediately and the live OWL subprocess is started for that exact batch.',
+      'Abandoned older queued/running batches are cancelled automatically.',
       'Coverage Info is authoritative for in-service date, in-service distance/mileage, model/build dates, and warranty/extended coverage.',
       'Major Components uses Chassis S/N and exact ENGINE / MAIN TRANSMISSION rows for Cummins and Allison serials.',
       'Product Registration is authoritative for registered/ordered customer account, name, address, city, state, ZIP, phone, and email.',
@@ -103,9 +107,9 @@ export async function GET() {
       '1. Extract the ENTIRE ZIP to a normal folder.',
       '2. Double-click STOP ALL DIEHL.cmd.',
       '3. Double-click START DIEHL VIN.cmd.',
-      '4. The launcher banner must say v5.15.',
+      '4. The launcher banner must say v5.16.',
       '5. Keep the Diehl VIN Platform website tab already open.',
-      '6. Start a VIN check. Any abandoned older active batch is cancelled automatically.',
+      '6. Press Start OWL Check. The VIN should move to running immediately and OWL should launch.',
       '7. Coverage Info -> Product S/N -> VIN -> Tab -> wait for populated data.',
       '8. Major Components -> Chassis S/N -> VIN -> Tab -> exact ENGINE / MAIN TRANSMISSION rows.',
       '9. Product Registration -> Customer section -> registered/ordered customer details.',
@@ -117,7 +121,7 @@ export async function GET() {
       status: 200,
       headers: {
         'Content-Type': 'application/zip',
-        'Content-Disposition': 'attachment; filename="Diehl_VIN_Local_Worker_v5_15.zip"',
+        'Content-Disposition': 'attachment; filename="Diehl_VIN_Local_Worker_v5_16.zip"',
         'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
         'Pragma': 'no-cache',
         'Expires': '0',
