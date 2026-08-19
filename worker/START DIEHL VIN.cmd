@@ -18,7 +18,7 @@ echo.
 echo Permanent runtime:
 echo %INSTALLDIR%
 echo.
-echo VIN In-Service: fast exact-field OWL Coverage + Major Components
+echo VIN In-Service: confirmed OWL Coverage + Major Components population
 echo DTNA Sales Order/AUTO VIN remains a separate workflow.
 echo Database viewer uses a lock-free verified Excel mirror.
 echo.
@@ -50,6 +50,8 @@ if errorlevel 1 goto :fail_package
 call :copy_file "owl_lookup_v2.py"
 if errorlevel 1 goto :fail_package
 call :copy_file "owl_lookup_v3.py"
+if errorlevel 1 goto :fail_package
+call :copy_file "owl_lookup_v4.py"
 if errorlevel 1 goto :fail_package
 call :copy_file "owl_login.py"
 if errorlevel 1 goto :fail_package
@@ -101,7 +103,8 @@ if not "%RC%"=="0" goto :fail_initializer
 echo.
 echo [5/5] SUCCESS
 echo       Diehl VIN v5.12 and Database viewer are running.
-echo       VIN In-Service uses exact OWL labels and exact Component S/N columns.
+echo       Coverage waits for populated OWL data after Tab before reading.
+echo       Major Components re-enters and verifies the VIN, presses Tab, then waits for the component table.
 echo       No fixed one-second VIN delay is used.
 echo       The website has been opened.
 echo.
