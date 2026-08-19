@@ -22,7 +22,7 @@ import service_v4 as base
 from database_cache import update_vin
 from excel_bridge import collect_open_workbook
 
-base.VERSION = '5.10'
+base.VERSION = '5.11'
 ROOT = Path(__file__).resolve().parent
 OWL_LOGIN = ROOT / 'owl_login.py'
 ORIGINAL_RUN_LOOKUP = base.run_lookup
@@ -245,10 +245,10 @@ base.write_result = robust_vin_write
 @base.app.get('/owl/status')
 def owl_status():
     return {
-        'ready': OWL_LOGIN.exists() and (ROOT / 'owl_lookup.py').exists(),
+        'ready': OWL_LOGIN.exists() and (ROOT / 'owl_lookup_v2.py').exists(),
         'source': 'OWL Coverage Info + Major Components',
         'version': base.VERSION,
-        'message': 'VIN In-Service verifies the VIN on both OWL pages, then writes the complete normalized result to Excel.',
+        'message': 'VIN In-Service uses the strict main-content Product S/N field, verifies the VIN on both OWL pages, then writes the complete result to Excel.',
     }
 
 
