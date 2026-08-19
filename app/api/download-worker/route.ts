@@ -5,16 +5,16 @@ export const runtime = 'nodejs';
 export const revalidate = 0;
 
 const REPO = 'Wickey23/Diehl-vin-platform';
-const PACKAGE_VERSION = '5.13';
-const PACKAGE_REF = '146ad38d14984d9056e74d2e5f350174ae650a45';
+const PACKAGE_VERSION = '5.14';
+const PACKAGE_REF = 'ff230da0ef85fcce9514ba9649401f24e477181f';
 const FILES = [
   'worker/START DIEHL VIN.cmd',
   'worker/STOP ALL DIEHL.cmd',
   'worker/DiehlInitializer.py',
-  'worker/DiehlInitializer_v513.py',
+  'worker/DiehlInitializer_v514.py',
   'worker/service_v4.py',
   'worker/service_v5.py',
-  'worker/service_v6.py',
+  'worker/service_v7.py',
   'worker/database_service.py',
   'worker/database_cache.py',
   'worker/excel_bridge.py',
@@ -50,8 +50,8 @@ export async function GET() {
 
     const launcher = get('START DIEHL VIN.cmd');
     const stopper = get('STOP ALL DIEHL.cmd');
-    const init513 = get('DiehlInitializer_v513.py');
-    const serviceV6 = get('service_v6.py');
+    const init514 = get('DiehlInitializer_v514.py');
+    const serviceV7 = get('service_v7.py');
     const owlFast = get('owl_lookup_v3.py');
     const owlConfirmed = get('owl_lookup_v4.py');
     const owlExact = get('owl_lookup_v5.py');
@@ -62,18 +62,20 @@ export async function GET() {
     const cache = get('database_cache.py');
     const excelBridge = get('excel_bridge.py');
 
-    if (!launcher.includes('SETUP AND START v5.13') || !launcher.includes('owl_lookup_v5.py') || !launcher.includes('service_v6.py')) throw new Error('Pinned v5.13 launcher verification failed.');
+    if (!launcher.includes('SETUP AND START v5.14') || !launcher.includes('DiehlInitializer_v514.py') || !launcher.includes('service_v7.py')) throw new Error('Pinned v5.14 launcher verification failed.');
+    if (!launcher.includes('existing Diehl VIN Platform website tab')) throw new Error('Pinned launcher does not document website-tab reuse.');
     if (!stopper.includes('service_v5\\.py') || !stopper.includes('DIEHL VIN - STOP ALL RUNNING')) throw new Error('Pinned Stop All utility verification failed.');
-    if (!init513.includes("EXPECTED_WORKER_VERSION = '5.13'") || !init513.includes("service_v6.py")) throw new Error('Pinned v5.13 initializer verification failed.');
-    if (!serviceV6.includes("service.base.VERSION = '5.13'")) throw new Error('Pinned v5.13 service version verification failed.');
+    if (!init514.includes("EXPECTED_WORKER_VERSION = '5.14'") || !init514.includes("service_v7.py")) throw new Error('Pinned v5.14 initializer verification failed.');
+    if (!init514.includes('base.webbrowser.open = lambda')) throw new Error('Pinned v5.14 initializer would still open another website tab.');
+    if (!serviceV7.includes("service.base.VERSION = '5.14'")) throw new Error('Pinned v5.14 service version verification failed.');
     if (!owlFast.includes('MIN_MAIN_X = 220') || !owlFast.includes('main_signature')) throw new Error('Pinned main-content OWL locator verification failed.');
     if (!owlConfirmed.includes("['Chassis S/N']") || !owlConfirmed.includes("page_kind == 'Major Components'") || !owlConfirmed.includes("field.press('Tab')")) throw new Error('Pinned Major Components Chassis S/N flow verification failed.');
     if (!owlConfirmed.includes('information populated and stable') || !owlConfirmed.includes('stable_hits >= 2')) throw new Error('Pinned OWL population-wait verification failed.');
-    if (!owlConfirmed.includes("normalized_chassis != normalized_vin")) throw new Error('Pinned Major Components VIN identity verification failed.');
+    if (!owlConfirmed.includes('normalized_chassis != normalized_vin')) throw new Error('Pinned Major Components VIN identity verification failed.');
     if (!owlExact.includes("['Product S/N']") || !owlExact.includes("['In Service Distance']") || !owlExact.includes("['Customer Name']")) throw new Error('Pinned exact live Coverage mapping verification failed.');
-    if (!owlExact.includes("core.major_lookup = flow.major_lookup")) throw new Error('Pinned v5 flow does not preserve corrected Major Components flow.');
+    if (!owlExact.includes('core.major_lookup = flow.major_lookup')) throw new Error('Pinned exact OWL flow does not preserve corrected Major Components logic.');
     if (!owlLogin.includes("OWL_URL = 'https://secure.freightliner.com/iwarranty/signOn'")) throw new Error('Pinned OWL login URL verification failed.');
-    if (!vinLookup.includes("OWL = ROOT / 'owl_lookup_v5.py'")) throw new Error('Pinned VIN lookup is not routed to exact OWL v5.');
+    if (!vinLookup.includes("OWL = ROOT / 'owl_lookup_v5.py'")) throw new Error('Pinned VIN lookup is not routed to exact OWL flow.');
     if (!runtime.includes('AUTO VIN could not be selected automatically') || !runtime.includes('Attached to already-open shared workbook')) throw new Error('Pinned DTNA runtime verification failed.');
     if (!database.includes("@app.post('/database/open-workbook')") || !database.includes('excel.Workbooks.Open') || !database.includes('workbook.Activate()')) throw new Error('Pinned Database Open Excel verification failed.');
     if (!database.includes('from database_cache import read_table') || database.includes('openpyxl')) throw new Error('Pinned Database viewer must remain lock-free.');
@@ -81,17 +83,18 @@ export async function GET() {
     if (!excelBridge.includes('collect_open_workbook') || !excelBridge.includes('GetRunningObjectTable')) throw new Error('Pinned Excel bridge verification failed.');
 
     const zip = new JSZip();
-    const folder = zip.folder('Diehl_VIN_Local_Worker_v5_13');
+    const folder = zip.folder('Diehl_VIN_Local_Worker_v5_14');
     if (!folder) throw new Error('Could not create ZIP folder.');
     for (const file of fetched) folder.file(file.path.replace(/^worker\//, ''), file.text);
 
     folder.file('PACKAGE VERSION.txt', [
       `Diehl VIN Local Worker ${PACKAGE_VERSION}`,
       `Pinned package revision: ${PACKAGE_REF}`,
+      'Website behavior: worker startup/restart does NOT open another Diehl VIN Platform tab. Keep using the tab already open.',
       'Coverage Info: enter VIN in Product S/N, verify exact VIN, press Tab, then wait for actual populated OWL fields before extraction.',
       'Major Components: enter VIN in Chassis S/N, verify exact VIN, press Tab, then wait for matching chassis data and the Major Components table.',
       'Major Components rejects stale data unless the populated Chassis S/N matches the requested VIN.',
-      'Coverage exact mappings confirmed from the live OWL page include In Service Distance, In Service Date, Cab Start Date, Build Date, Base Model, Model, Order Date, Customer Name, Unit #, PDI Date, First Service Date, Special Conditions, and PDI Submitting Location.',
+      'Coverage exact mappings include In Service Distance, In Service Date, Cab Start Date, Build Date, Base Model, Model, Order Date, Customer Name, Unit #, PDI Date, First Service Date, Special Conditions, and PDI Submitting Location.',
       'No fixed one-second delay is used; the worker polls the actual populated page state.',
       'Left Quick Search remains forbidden.',
       'DTNA remains a separate Sales Order + Dealer Reporting AUTO VIN workflow.',
@@ -107,10 +110,10 @@ export async function GET() {
       '1. Extract the ENTIRE ZIP to a normal folder.',
       '2. Double-click STOP ALL DIEHL.cmd.',
       '3. Double-click START DIEHL VIN.cmd.',
-      '4. The launcher banner must say v5.13.',
-      '5. Coverage Info uses Product S/N -> verify VIN -> Tab -> wait for populated fields -> extract.',
-      '6. Major Components uses Chassis S/N -> verify VIN -> Tab -> wait for matching chassis/component table -> extract.',
-      '7. Major Components is a completely separate VIN entry; Coverage page state is never reused.',
+      '4. The launcher banner must say v5.14.',
+      '5. Keep the Diehl VIN Platform website tab you already have open; startup will not open another one.',
+      '6. Coverage Info uses Product S/N -> verify VIN -> Tab -> wait for populated fields -> extract.',
+      '7. Major Components uses Chassis S/N -> verify VIN -> Tab -> wait for matching chassis/component table -> extract.',
       '8. If Chassis S/N does not match the requested VIN, the result is rejected.',
       '9. Successful results are written and verified in the VIN In-Service worksheet.',
     ].join('\r\n'));
@@ -120,7 +123,7 @@ export async function GET() {
       status: 200,
       headers: {
         'Content-Type': 'application/zip',
-        'Content-Disposition': 'attachment; filename="Diehl_VIN_Local_Worker_v5_13.zip"',
+        'Content-Disposition': 'attachment; filename="Diehl_VIN_Local_Worker_v5_14.zip"',
         'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
         'Pragma': 'no-cache',
         'Expires': '0',
@@ -129,6 +132,6 @@ export async function GET() {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Could not build local worker ZIP.';
-    return Response.json({error: message}, {status: 500, headers: {'Cache-Control': 'no-store'}});
+    return Response.json({error: message}, {status: 500, headers: {'Cache-Control':'no-store'}});
   }
 }
