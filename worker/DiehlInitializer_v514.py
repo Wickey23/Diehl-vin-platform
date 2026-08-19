@@ -4,7 +4,7 @@ from pathlib import Path
 
 import DiehlInitializer as base
 
-base.EXPECTED_WORKER_VERSION = '5.14'
+base.EXPECTED_WORKER_VERSION = '5.15'
 base.SERVICE = Path(__file__).resolve().parent / 'service_v7.py'
 
 # The website is already open when employees start/restart the local worker.
