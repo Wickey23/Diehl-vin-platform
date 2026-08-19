@@ -27,7 +27,7 @@ WORKER_LOG = LOG_DIR / 'worker.log'
 DATABASE_LOG = LOG_DIR / 'database.log'
 SERVICE = ROOT / 'service_v5.py'
 DATABASE_SERVICE = ROOT / 'database_service.py'
-EXPECTED_WORKER_VERSION = '5.11'
+EXPECTED_WORKER_VERSION = '5.12'
 
 
 def venv_python() -> Path:
@@ -54,11 +54,8 @@ def import_check(py: Path) -> bool:
         'print("dependency-check-ok")'
     )
     result = subprocess.run(
-        [str(py), '-c', code],
-        cwd=str(ROOT),
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
+        [str(py), '-c', code], cwd=str(ROOT), stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT, text=True,
     )
     if result.returncode == 0:
         return True
@@ -130,7 +127,7 @@ def resolve_shared_workbook() -> Path:
     print(f'      Found: {workbook}')
     save_config(workbook)
     print('      Shared workbook bound to this worker.')
-    print('      VIN In-Service source: OWL.')
+    print('      VIN In-Service source: OWL exact-field mapper.')
     print('      DTNA Sales Order/AUTO VIN remains a separate workflow.')
     return workbook
 
@@ -153,11 +150,9 @@ def spawn_background(script: Path, log_path: Path, label: str) -> subprocess.Pop
     handle = log_path.open('a', encoding='utf-8', buffering=1)
     handle.write(f'\n[{time.strftime("%Y-%m-%d %H:%M:%S")}] Starting {label}\n')
     proc = subprocess.Popen(
-        [str(venv_python()), str(script)],
-        cwd=str(ROOT),
+        [str(venv_python()), str(script)], cwd=str(ROOT),
         creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
-        stdout=handle,
-        stderr=subprocess.STDOUT,
+        stdout=handle, stderr=subprocess.STDOUT,
     )
     proc._diehl_log_handle = handle  # type: ignore[attr-defined]
     return proc
@@ -179,7 +174,7 @@ def wait_ready(proc: subprocess.Popen, url: str, product: str, log_path: Path, t
             except Exception:
                 pass
             return info
-        time.sleep(.25)
+        time.sleep(.15)
     try:
         proc.terminate()
     except Exception:
