@@ -12,15 +12,15 @@ set "PY312=%LocalAppData%\Programs\Python\Python312\python.exe"
 title Diehl VIN - Setup and Start
 color 0F
 echo ============================================================
-echo  DIEHL VIN - SETUP AND START v5.12
+echo  DIEHL VIN - SETUP AND START v5.13
 echo ============================================================
 echo.
 echo Permanent runtime:
 echo %INSTALLDIR%
 echo.
-echo VIN In-Service: confirmed OWL Coverage + Major Components population
+echo VIN In-Service: exact OWL Coverage + Major Components flow
+echo Coverage uses Product S/N. Major Components uses Chassis S/N.
 echo DTNA Sales Order/AUTO VIN remains a separate workflow.
-echo Database viewer uses a lock-free verified Excel mirror.
 echo.
 
 echo [1/5] Installing packaged Diehl program files...
@@ -29,9 +29,13 @@ if errorlevel 1 goto :fail_install
 
 call :copy_file "DiehlInitializer.py"
 if errorlevel 1 goto :fail_package
+call :copy_file "DiehlInitializer_v513.py"
+if errorlevel 1 goto :fail_package
 call :copy_file "service_v4.py"
 if errorlevel 1 goto :fail_package
 call :copy_file "service_v5.py"
+if errorlevel 1 goto :fail_package
+call :copy_file "service_v6.py"
 if errorlevel 1 goto :fail_package
 call :copy_file "database_service.py"
 if errorlevel 1 goto :fail_package
@@ -52,6 +56,8 @@ if errorlevel 1 goto :fail_package
 call :copy_file "owl_lookup_v3.py"
 if errorlevel 1 goto :fail_package
 call :copy_file "owl_lookup_v4.py"
+if errorlevel 1 goto :fail_package
+call :copy_file "owl_lookup_v5.py"
 if errorlevel 1 goto :fail_package
 call :copy_file "owl_login.py"
 if errorlevel 1 goto :fail_package
@@ -96,16 +102,15 @@ echo [3/5] Verifying local environment...
 echo [4/5] Finding shared OneDrive workbook and starting worker services...
 echo.
 cd /d "%INSTALLDIR%"
-"%PYEXE%" DiehlInitializer.py
+"%PYEXE%" DiehlInitializer_v513.py
 set "RC=%errorlevel%"
 if not "%RC%"=="0" goto :fail_initializer
 
 echo.
 echo [5/5] SUCCESS
-echo       Diehl VIN v5.12 and Database viewer are running.
-echo       Coverage waits for populated OWL data after Tab before reading.
-echo       Major Components re-enters and verifies the VIN, presses Tab, then waits for the component table.
-echo       No fixed one-second VIN delay is used.
+echo       Diehl VIN v5.13 and Database viewer are running.
+echo       Coverage: Product S/N -> verify VIN -> Tab -> wait for actual populated fields.
+echo       Major Components: Chassis S/N -> verify VIN -> Tab -> wait for chassis/component table.
 echo       The website has been opened.
 echo.
 timeout /t 2 /nobreak >nul
