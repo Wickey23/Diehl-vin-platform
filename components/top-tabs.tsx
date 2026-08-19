@@ -11,15 +11,16 @@ const tabs = [
   { href: '/database', label: 'Database' },
 ];
 
-const LATEST_WORKER_VERSION = '5.13';
-const LATEST_WORKER_UPDATED = '08/19/2026 1:29 PM ET';
+const LATEST_WORKER_VERSION = '5.14';
+const LATEST_WORKER_UPDATED = '08/19/2026 1:46 PM ET';
 const RELEASE_NOTES = [
-  'Coverage Info now enters the VIN only in the main Product S/N field, verifies it, presses Tab, and waits for actual OWL vehicle information to populate before extracting.',
-  'Major Components now uses the correct Chassis S/N field shown on the live OWL page — not Product S/N and never the left Quick Search box.',
-  'Major Components independently clears Chassis S/N, enters the full VIN, verifies it, presses Tab, and waits for the matching chassis/component data before reading anything.',
+  'Starting or restarting the local worker no longer opens another Diehl VIN Platform website tab. Keep using the website tab you already have open.',
+  'Coverage Info enters the VIN only in the main Product S/N field, verifies it, presses Tab, and waits for actual OWL vehicle information to populate before extracting.',
+  'Major Components uses the correct Chassis S/N field — not Product S/N and never the left Quick Search box.',
+  'Major Components independently clears Chassis S/N, enters the full VIN, verifies it, presses Tab, and waits for matching chassis/component data before reading anything.',
   'The requested VIN must match the populated Chassis S/N before Major Components data is accepted, preventing stale data from a prior vehicle.',
   'The Major Components table must populate with Component, MFG, Model, and Component S/N before engine or Allison information is extracted.',
-  'Coverage mapping now uses the exact live OWL labels confirmed in testing: In Service Distance, In Service Date, Cab Start Date, Build Date, Base Model, Model, Order Date, Customer Name, Unit #, PDI Date, First Service Date, Special Conditions, and PDI Submitting Location.',
+  'Coverage mapping uses the exact live OWL labels confirmed in testing: In Service Distance, In Service Date, Cab Start Date, Build Date, Base Model, Model, Order Date, Customer Name, Unit #, PDI Date, First Service Date, Special Conditions, and PDI Submitting Location.',
   'There is no fixed one-second delay; the worker reacts as soon as OWL has actually populated stable result data.',
 ];
 
@@ -66,7 +67,7 @@ export function TopTabs() {
             </div>
 
             <div style={{padding:'18px 22px 8px'}}>
-              <p style={{margin:'0 0 12px',color:'#475467',fontSize:14}}>This release corrects the live OWL VIN-entry sequence on both pages and locks the Coverage mapping to the fields confirmed in the live interface.</p>
+              <p style={{margin:'0 0 12px',color:'#475467',fontSize:14}}>This release keeps the existing website tab in place and preserves the corrected live OWL VIN-entry and exact-field extraction flow.</p>
               <ul style={{margin:'0 0 8px',paddingLeft:22,color:'#344054',fontSize:14,lineHeight:1.55}}>
                 {RELEASE_NOTES.map((note) => <li key={note} style={{marginBottom:8}}>{note}</li>)}
               </ul>
