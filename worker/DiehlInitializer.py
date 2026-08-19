@@ -8,7 +8,6 @@ import subprocess
 import sys
 import time
 import urllib.request
-import webbrowser
 from pathlib import Path
 import tkinter as tk
 from tkinter import messagebox
@@ -19,15 +18,14 @@ ROOT = Path(__file__).resolve().parent
 VENV = ROOT / '.venv'
 CONFIG = ROOT / 'config.json'
 REQUIREMENTS = ROOT / 'requirements.txt'
-SITE = 'https://diehl-vin-platform.vercel.app'
 WORKER_PING = 'http://127.0.0.1:8765/ping'
 DATABASE_PING = 'http://127.0.0.1:8766/ping'
 LOG_DIR = ROOT / 'logs'
 WORKER_LOG = LOG_DIR / 'worker.log'
 DATABASE_LOG = LOG_DIR / 'database.log'
-SERVICE = ROOT / 'service_v5.py'
+SERVICE = ROOT / 'service_v7.py'
 DATABASE_SERVICE = ROOT / 'database_service.py'
-EXPECTED_WORKER_VERSION = '5.12'
+EXPECTED_WORKER_VERSION = '5.16'
 
 
 def venv_python() -> Path:
@@ -53,10 +51,7 @@ def import_check(py: Path) -> bool:
         'import playwright.sync_api; '
         'print("dependency-check-ok")'
     )
-    result = subprocess.run(
-        [str(py), '-c', code], cwd=str(ROOT), stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT, text=True,
-    )
+    result = subprocess.run([str(py), '-c', code], cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     if result.returncode == 0:
         return True
     print('      Dependency verification failed:')
@@ -88,7 +83,6 @@ def ensure_environment() -> None:
     marker = VENV / '.diehl_requirements_hash'
     expected = requirements_hash()
     current = marker.read_text(encoding='utf-8').strip() if marker.exists() else ''
-
     if current != expected:
         run([str(py), '-m', 'pip', 'install', '--upgrade', '-r', str(REQUIREMENTS)], 'Installing/updating required packages')
     else:
@@ -97,7 +91,6 @@ def ensure_environment() -> None:
     if not import_check(py):
         print('      Installed environment is incomplete. Repairing dependencies...')
         run([str(py), '-m', 'pip', 'install', '--upgrade', '--force-reinstall', '--no-cache-dir', '-r', str(REQUIREMENTS)], 'Repairing required packages')
-
     if not import_check(py):
         repair_pywin32(py)
 
@@ -149,11 +142,7 @@ def spawn_background(script: Path, log_path: Path, label: str) -> subprocess.Pop
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     handle = log_path.open('a', encoding='utf-8', buffering=1)
     handle.write(f'\n[{time.strftime("%Y-%m-%d %H:%M:%S")}] Starting {label}\n')
-    proc = subprocess.Popen(
-        [str(venv_python()), str(script)], cwd=str(ROOT),
-        creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
-        stdout=handle, stderr=subprocess.STDOUT,
-    )
+    proc = subprocess.Popen([str(venv_python()), str(script)], cwd=str(ROOT), creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0), stdout=handle, stderr=subprocess.STDOUT)
     proc._diehl_log_handle = handle  # type: ignore[attr-defined]
     return proc
 
@@ -162,27 +151,19 @@ def wait_ready(proc: subprocess.Popen, url: str, product: str, log_path: Path, t
     deadline = time.time() + timeout_seconds
     while time.time() < deadline:
         if proc.poll() is not None:
-            try:
-                proc._diehl_log_handle.close()  # type: ignore[attr-defined]
-            except Exception:
-                pass
+            try: proc._diehl_log_handle.close()  # type: ignore[attr-defined]
+            except Exception: pass
             raise RuntimeError(f'{product} exited during startup with code {proc.returncode}. See {log_path}.')
         info = ping(url, product, .5)
         if info:
-            try:
-                proc._diehl_log_handle.close()  # type: ignore[attr-defined]
-            except Exception:
-                pass
+            try: proc._diehl_log_handle.close()  # type: ignore[attr-defined]
+            except Exception: pass
             return info
         time.sleep(.15)
-    try:
-        proc.terminate()
-    except Exception:
-        pass
-    try:
-        proc._diehl_log_handle.close()  # type: ignore[attr-defined]
-    except Exception:
-        pass
+    try: proc.terminate()
+    except Exception: pass
+    try: proc._diehl_log_handle.close()  # type: ignore[attr-defined]
+    except Exception: pass
     raise RuntimeError(f'{product} did not become ready. See {log_path}.')
 
 
@@ -193,7 +174,7 @@ def start_services() -> None:
         if version != EXPECTED_WORKER_VERSION:
             raise RuntimeError(
                 f'An older Diehl worker (v{version or "unknown"}) is already running on port 8765. '
-                'Use Stop All Running, then start this version.'
+                'Run STOP ALL DIEHL, then start this package again.'
             )
         print(f'      Main worker already running: v{EXPECTED_WORKER_VERSION}.')
     else:
@@ -201,7 +182,7 @@ def start_services() -> None:
         info = wait_ready(proc, WORKER_PING, 'DiehlVINWorker', WORKER_LOG)
         if str(info.get('version') or '') != EXPECTED_WORKER_VERSION:
             raise RuntimeError(f'Unexpected worker version started: {info.get("version")}')
-        print('      Local worker connected on 127.0.0.1:8765.')
+        print(f'      Local worker connected on 127.0.0.1:8765 as v{EXPECTED_WORKER_VERSION}.')
 
     if ping(DATABASE_PING, 'DiehlVINDatabase', .5):
         print('      Database viewer already running.')
@@ -233,6 +214,9 @@ def main() -> None:
         py = venv_python()
         print('      Switching initialization to verified venv Python...')
         print(f'      Venv Python: {py}')
+        # Re-launch THIS SAME initializer file. Its built-in version/service are
+        # already the current package version, so the venv transition cannot
+        # silently fall back to an older worker implementation.
         result = subprocess.run([str(py), str(Path(__file__).resolve()), '--inside-venv'], cwd=str(ROOT))
         raise SystemExit(result.returncode)
 
@@ -240,14 +224,13 @@ def main() -> None:
     expected = venv_python().resolve()
     if os.path.normcase(str(current)) != os.path.normcase(str(expected)):
         raise RuntimeError(f'Initializer is using the wrong Python runtime: {current}. Expected: {expected}')
-
     if not import_check(current):
         raise RuntimeError('Verified venv dependencies are no longer available.')
 
     resolve_shared_workbook()
     print('      Starting local worker services...')
     start_services()
-    webbrowser.open(SITE)
+    # The web application is already open. Do not create another website tab.
 
 
 if __name__ == '__main__':
