@@ -12,16 +12,15 @@ set "PY312=%LocalAppData%\Programs\Python\Python312\python.exe"
 title Diehl VIN - Setup and Start
 color 0F
 echo ============================================================
-echo  DIEHL VIN - SETUP AND START v5.11
+echo  DIEHL VIN - SETUP AND START v5.12
 echo ============================================================
 echo.
 echo Permanent runtime:
 echo %INSTALLDIR%
 echo.
-echo VIN In-Service: strict OWL main Product S/N + verified Coverage/Major Components
+echo VIN In-Service: fast exact-field OWL Coverage + Major Components
 echo DTNA Sales Order/AUTO VIN remains a separate workflow.
 echo Database viewer uses a lock-free verified Excel mirror.
-echo Database Open Excel activates the exact shared workbook.
 echo.
 
 echo [1/5] Installing packaged Diehl program files...
@@ -49,6 +48,8 @@ if errorlevel 1 goto :fail_package
 call :copy_file "owl_lookup.py"
 if errorlevel 1 goto :fail_package
 call :copy_file "owl_lookup_v2.py"
+if errorlevel 1 goto :fail_package
+call :copy_file "owl_lookup_v3.py"
 if errorlevel 1 goto :fail_package
 call :copy_file "owl_login.py"
 if errorlevel 1 goto :fail_package
@@ -89,7 +90,7 @@ if not defined PYEXE goto :fail_python_missing
 echo       Python ready: %PYEXE%
 echo.
 
-echo [3/5] Verifying and repairing local environment if needed...
+echo [3/5] Verifying local environment...
 echo [4/5] Finding shared OneDrive workbook and starting worker services...
 echo.
 cd /d "%INSTALLDIR%"
@@ -99,11 +100,12 @@ if not "%RC%"=="0" goto :fail_initializer
 
 echo.
 echo [5/5] SUCCESS
-echo       Diehl VIN v5.11 and Database viewer are running.
-echo       VIN In-Service rejects the left Quick Search box and uses only the main Product S/N field.
+echo       Diehl VIN v5.12 and Database viewer are running.
+echo       VIN In-Service uses exact OWL labels and exact Component S/N columns.
+echo       No fixed one-second VIN delay is used.
 echo       The website has been opened.
 echo.
-timeout /t 3 /nobreak >nul
+timeout /t 2 /nobreak >nul
 exit /b 0
 
 :copy_file
