@@ -49,6 +49,10 @@ def frames(context):
             yield page, page
 
 
+def clean(value: Any) -> str:
+    return re.sub(r'\s+', ' ', str(value or '')).strip()
+
+
 def body_text(frame) -> str:
     try:
         return frame.locator('body').inner_text(timeout=3000)
@@ -67,18 +71,21 @@ def inject_hint(page, message: str) -> None:
 
 
 def find_vin_input(frame):
-    """Find the main OWL Product S/N field and never the left-side Quick Search box."""
-    # 1) Exact legacy-table relationship: cell containing Product S/N -> next cell -> input.
-    try:
-        loc = frame.locator("xpath=//td[contains(translate(normalize-space(.), 'abcdefghijklmnopqrstuvwxyz', 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'), 'PRODUCT S/N')]/following-sibling::td[1]//input[not(@type) or @type='text']")
-        for i in range(loc.count()):
-            item = loc.nth(i)
-            if item.is_visible() and item.is_enabled():
-                return item
-    except Exception:
-        pass
+    """Find main OWL Product S/N input, never the left Quick Search input."""
+    xpaths = [
+        "//td[contains(translate(normalize-space(.),'abcdefghijklmnopqrstuvwxyz','ABCDEFGHIJKLMNOPQRSTUVWXYZ'),'PRODUCT S/N')]/following-sibling::td[1]//input[not(@type) or @type='text']",
+        "//*[contains(translate(normalize-space(.),'abcdefghijklmnopqrstuvwxyz','ABCDEFGHIJKLMNOPQRSTUVWXYZ'),'PRODUCT S/N')]/ancestor::tr[1]//input[not(@type) or @type='text']",
+    ]
+    for xp in xpaths:
+        try:
+            loc = frame.locator('xpath=' + xp)
+            for i in range(loc.count()):
+                item = loc.nth(i)
+                if item.is_visible() and item.is_enabled():
+                    return item
+        except Exception:
+            pass
 
-    # 2) Search rows independently. A timeout/bad legacy row must not abort the whole scan.
     try:
         rows = frame.locator('tr')
         count = rows.count()
@@ -87,62 +94,29 @@ def find_vin_input(frame):
     for i in range(count):
         try:
             row = rows.nth(i)
-            text = re.sub(r'\s+', ' ', row.text_content(timeout=250) or '').strip()
-            if not re.search(r'Product\s+S/N\s*:', text, re.I):
+            text = clean(row.text_content(timeout=200))
+            if not re.search(r'Product\s+S/N\s*:?', text, re.I):
                 continue
-            inputs = row.locator('input[type="text"], input:not([type])')
+            inputs = row.locator('input[type="text"],input:not([type])')
             for j in range(inputs.count()):
                 item = inputs.nth(j)
                 if item.is_visible() and item.is_enabled():
                     return item
         except Exception:
             continue
-
-    # 3) DOM fallback that walks text-bearing cells and returns the adjacent input.
-    try:
-        handle = frame.evaluate_handle("""() => {
-          const cells = Array.from(document.querySelectorAll('td,th,label,span,b,font'));
-          for (const el of cells) {
-            const text = (el.textContent || '').replace(/\s+/g,' ').trim();
-            if (!/^Product\s+S\/N\s*:/i.test(text)) continue;
-            const row = el.closest('tr');
-            if (row) {
-              const cell = el.closest('td,th');
-              if (cell && cell.nextElementSibling) {
-                const input = cell.nextElementSibling.querySelector('input[type="text"],input:not([type])');
-                if (input) return input;
-              }
-              const inputs = row.querySelectorAll('input[type="text"],input:not([type])');
-              if (inputs.length) return inputs[0];
-            }
-          }
-          return null;
-        }""")
-        element = handle.as_element()
-        if element is not None:
-            locator = frame.locator('input').filter(has=frame.locator('xpath=.'))
-            # Playwright cannot directly convert an ElementHandle to Locator reliably here,
-            # so use the element handle itself via a temporary id.
-            temp_id = frame.evaluate("""el => { if(!el.id) el.id='diehl-product-sn-'+Math.random().toString(36).slice(2); return el.id; }""", element)
-            item = frame.locator('#' + temp_id)
-            if item.count() and item.first.is_visible() and item.first.is_enabled():
-                return item.first
-    except Exception:
-        pass
-
     return None
 
 
 def wait_logged_in(context, timeout: int = 240) -> None:
-    deadline=time.time()+timeout
-    while time.time()<deadline:
-        for page,frame in frames(context):
-            text=body_text(frame)
-            url=(getattr(frame,'url','') or '').lower()
-            if re.search(r'Coverage\s+Info|Major\s+Components|Online\s+Warranty|OWL\s+Home',text,re.I) or '/iwarranty/' in url and 'signon' not in url:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        for page, frame in frames(context):
+            text = body_text(frame)
+            url = (getattr(frame, 'url', '') or '').lower()
+            if re.search(r'Coverage\s+Info|Major\s+Components|Online\s+Warranty|OWL\s+Home', text, re.I) or ('/iwarranty/' in url and 'signon' not in url):
                 log('OWL authenticated session is ready.')
                 return
-            inject_hint(page,'Diehl VIN: complete your Freightliner/OWL login and MFA. The worker will continue automatically.')
+            inject_hint(page, 'Diehl VIN: complete your Freightliner/OWL login and MFA. The worker will continue automatically.')
         time.sleep(1)
     raise RuntimeError('OWL login did not become ready within 4 minutes. Complete login/MFA and retry.')
 
@@ -156,146 +130,333 @@ def open_owl_url(context, url: str, label: str):
 
 
 def wait_for_search_page(context, timeout: int = 30):
-    deadline=time.time()+timeout
-    while time.time()<deadline:
-        for page,frame in frames(context):
-            vin_input=find_vin_input(frame)
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        for page, frame in frames(context):
+            vin_input = find_vin_input(frame)
             if vin_input is not None:
                 log(f'Found OWL Product S/N field in frame: {getattr(frame, "url", "") or "[same page]"}')
-                return page,frame,vin_input
-        time.sleep(.4)
+                return page, frame, vin_input
+        time.sleep(.35)
     raise RuntimeError('OWL page opened, but the main Product S/N field could not be found.')
 
 
-def submit_vin(context, vin: str):
-    page,frame,vin_input=wait_for_search_page(context)
+def page_has_explicit_not_found(text: str) -> bool:
+    return bool(re.search(r'not\s+found|no\s+(vehicle|record|coverage|results?)|invalid\s+(vin|serial)|no\s+matching', text, re.I))
 
+
+def submit_vin(context, vin: str):
+    page, frame, vin_input = wait_for_search_page(context)
     for attempt in range(1, 4):
         try:
             vin_input.click()
             vin_input.fill('')
             vin_input.type(vin, delay=35)
             page.wait_for_timeout(250)
-            actual = (vin_input.input_value() or '').strip().upper()
+            actual = clean(vin_input.input_value()).upper()
             log(f'OWL {vin}: Product S/N fill attempt {attempt}; field contains {actual or "[blank]"}.')
             if actual == vin:
                 break
         except Exception:
             actual = ''
         if attempt == 3:
-            raise RuntimeError(f'OWL Product S/N field did not contain VIN {vin}; refusing to press Tab.')
-        page,frame,vin_input=wait_for_search_page(context,10)
+            raise RuntimeError(f'OWL Product S/N field did not contain VIN {vin}; refusing to continue.')
+        page, frame, vin_input = wait_for_search_page(context, 10)
 
     log(f'OWL {vin}: Product S/N verified; waiting 1 full second before Tab.')
     page.wait_for_timeout(1000)
-    actual = (vin_input.input_value() or '').strip().upper()
+    actual = clean(vin_input.input_value()).upper()
     if actual != vin:
         raise RuntimeError(f'OWL Product S/N changed before Tab. Expected {vin}, found {actual or "[blank]"}.')
-    log(f'OWL {vin}: 1 second elapsed and Product S/N still verified; pressing Tab now.')
     vin_input.press('Tab')
+    log(f'OWL {vin}: Tab sent after verified 1-second delay.')
     page.wait_for_timeout(1200)
 
     if 'QuickSearch' in (page.url or ''):
-        raise RuntimeError('OWL navigated to Quick Search after Tab; Product S/N focus was not retained.')
+        raise RuntimeError('OWL navigated to Quick Search after Product S/N Tab; refusing to use that page as a VIN result.')
 
-    previous=''; stable=0; deadline=time.time()+45
-    while time.time()<deadline:
-        page.wait_for_timeout(650); current=body_text(frame)
-        if current==previous and len(current)>40: stable+=1
-        else: stable=0
-        previous=current; normalized=re.sub(r'[^A-Z0-9]','',current.upper())
-        if vin in normalized and stable>=1: break
-        if re.search(r'not\s+found|no\s+(vehicle|record|coverage|results?)|invalid\s+(vin|serial)',current,re.I) and stable>=1: break
-        if stable>=3: break
-    return page,frame
+    previous = ''
+    stable = 0
+    deadline = time.time() + 45
+    while time.time() < deadline:
+        page.wait_for_timeout(500)
+        current = body_text(frame)
+        if current == previous and len(current) > 40:
+            stable += 1
+        else:
+            stable = 0
+        previous = current
+        normalized = re.sub(r'[^A-Z0-9]', '', current.upper())
+        if vin in normalized and stable >= 1:
+            break
+        if page_has_explicit_not_found(current) and stable >= 1:
+            break
+        if stable >= 5:
+            break
+    return page, frame
 
 
-def norm(value: str) -> str:
-    return re.sub(r'\s+',' ',value or '').strip()
+def harvest(frame) -> dict[str, Any]:
+    """Capture OWL legacy table structure without depending on one label spelling."""
+    data: dict[str, Any] = {'fields': {}, 'rows': [], 'text': body_text(frame)}
+    try:
+        payload = frame.evaluate("""() => {
+          const norm=s=>(s||'').replace(/\s+/g,' ').trim();
+          const fields={};
+          const rows=[];
+          for(const tr of document.querySelectorAll('tr')){
+            const cells=Array.from(tr.querySelectorAll(':scope > td,:scope > th')).map(td=>norm(td.innerText||td.textContent));
+            if(cells.some(Boolean)) rows.push(cells);
+            const direct=Array.from(tr.querySelectorAll('input,select,textarea'));
+            for(const input of direct){
+              let label='';
+              const cell=input.closest('td,th');
+              if(cell){
+                const prev=cell.previousElementSibling;
+                if(prev) label=norm(prev.innerText||prev.textContent);
+              }
+              if(!label){
+                const id=input.id;
+                if(id){const l=document.querySelector(`label[for="${CSS.escape(id)}"]`);if(l)label=norm(l.innerText||l.textContent);}
+              }
+              let value='';
+              if(input.tagName==='SELECT') value=norm(input.options[input.selectedIndex]?.text||input.value);
+              else value=norm(input.value);
+              if(label && value) fields[label]=value;
+            }
+            if(cells.length===2 && cells[0] && cells[1] && cells[0].length<80) fields[cells[0]]=cells[1];
+          }
+          return {fields,rows};
+        }""")
+        if isinstance(payload, dict):
+            data['fields'] = payload.get('fields') or {}
+            data['rows'] = payload.get('rows') or []
+    except Exception:
+        pass
+    return data
 
 
-def labeled(text: str, labels: list[str]) -> str:
-    for label in labels:
-        for pattern in (rf'{label}\s*[:\-]?\s*([^\n\r|]{{1,160}})',rf'{label}\s*[\n\r]+\s*([^\n\r]{{1,160}})'):
-            m=re.search(pattern,text,re.I)
-            if m:
-                value=norm(m.group(1))
-                if value and not re.fullmatch(label,value,re.I): return value
+def field_value(fields: dict[str, Any], aliases: list[str]) -> str:
+    for alias in aliases:
+        rx = re.compile(alias, re.I)
+        for key, value in fields.items():
+            if rx.search(clean(key)):
+                v = clean(value)
+                if v:
+                    return v
     return ''
 
 
-def table_rows(frame) -> list[str]:
-    try: return frame.locator('tr').all_inner_texts()
-    except Exception: return []
+def labeled(text: str, aliases: list[str]) -> str:
+    for alias in aliases:
+        for pattern in (rf'{alias}\s*[:#\-]?\s*([^\n\r|]{{1,180}})', rf'{alias}\s*[\n\r]+\s*([^\n\r]{{1,180}})'):
+            m = re.search(pattern, text, re.I)
+            if m:
+                v = clean(m.group(1))
+                if v:
+                    return v
+    return ''
 
 
-def extract_serial_from_rows(rows: list[str], words: list[str]) -> str:
+def pick(harvested: dict[str, Any], aliases: list[str]) -> str:
+    return field_value(harvested.get('fields') or {}, aliases) or labeled(harvested.get('text') or '', aliases)
+
+
+def page_confirms_vin(harvested: dict[str, Any], vin: str) -> bool:
+    text = harvested.get('text') or ''
+    if vin in re.sub(r'[^A-Z0-9]', '', text.upper()):
+        return True
+    for value in (harvested.get('fields') or {}).values():
+        if vin == re.sub(r'[^A-Z0-9]', '', clean(value).upper()):
+            return True
+    return False
+
+
+def coverage_rows(harvested: dict[str, Any]) -> list[list[str]]:
+    out: list[list[str]] = []
+    for row in harvested.get('rows') or []:
+        cleaned = [clean(x) for x in row if clean(x)]
+        if len(cleaned) < 2:
+            continue
+        joined = ' | '.join(cleaned)
+        if re.search(r'coverage|warranty|start|expire|expiration|term|miles|months|component|description', joined, re.I):
+            out.append(cleaned)
+    return out[:250]
+
+
+def component_records(harvested: dict[str, Any]) -> list[dict[str, str]]:
+    rows = harvested.get('rows') or []
+    records: list[dict[str, str]] = []
+    headers: list[str] | None = None
     for row in rows:
-        compact=norm(row)
-        if not all(re.search(word,compact,re.I) for word in words): continue
-        m=re.search(r'(?:Serial(?:\s+Number|\s+No\.?)?|S/N)\s*[:#\-]?\s*([A-Z0-9][A-Z0-9\-]{4,30})',compact,re.I)
-        if m: return m.group(1).upper()
-        tokens=re.findall(r'\b[A-Z0-9][A-Z0-9\-]{5,30}\b',compact.upper())
-        ignored={'ALLISON','ENGINE','TRANSMISSION','COMPONENT','SERIAL','NUMBER'}
-        candidates=[t for t in tokens if t not in ignored and not t.isdigit()]
-        if candidates: return candidates[-1]
+        cells = [clean(x) for x in row]
+        if len(cells) < 2:
+            continue
+        joined = ' '.join(cells)
+        if headers is None and re.search(r'component|description|make|manufacturer|model|serial', joined, re.I):
+            headers = cells
+            continue
+        if headers and len(cells) >= 2:
+            record = {headers[i] if i < len(headers) and headers[i] else f'Column {i+1}': cells[i] for i in range(len(cells)) if cells[i]}
+            if record and any(re.search(r'engine|allison|transmission|axle|component', v, re.I) for v in record.values()):
+                records.append(record)
+        elif re.search(r'engine|allison|transmission|axle', joined, re.I):
+            records.append({f'Column {i+1}': v for i, v in enumerate(cells) if v})
+    return records[:200]
+
+
+def serial_from_records(records: list[dict[str, str]], kind: str) -> str:
+    target = re.compile(kind, re.I)
+    for record in records:
+        joined = ' | '.join(clean(v) for v in record.values())
+        if not target.search(joined):
+            continue
+        for key, value in record.items():
+            if re.search(r'serial|s/n', key, re.I):
+                v = clean(value).upper()
+                if re.fullmatch(r'[A-Z0-9][A-Z0-9\-]{4,30}', v):
+                    return v
+        m = re.search(r'(?:Serial(?:\s+Number|\s+No\.?)?|S/N)\s*[:#\-]?\s*([A-Z0-9][A-Z0-9\-]{4,30})', joined, re.I)
+        if m:
+            return m.group(1).upper()
+    return ''
+
+
+def model_from_records(records: list[dict[str, str]], kind: str) -> str:
+    target = re.compile(kind, re.I)
+    for record in records:
+        joined = ' | '.join(clean(v) for v in record.values())
+        if not target.search(joined):
+            continue
+        for key, value in record.items():
+            if re.search(r'model|description', key, re.I) and clean(value):
+                return clean(value)
     return ''
 
 
 def coverage_lookup(context, vin: str) -> dict[str, Any]:
     open_owl_url(context, OWL_COVERAGE_URL, 'Coverage Info / Check Coverage')
-    page,frame=submit_vin(context,vin); inject_hint(page,f'Diehl VIN: reading Coverage Info for {vin}')
-    text=body_text(frame); compact=norm(text)
-    if re.search(r'not\s+found|no\s+(vehicle|record|coverage|results?)|invalid\s+(vin|serial)',compact,re.I):
-        return {'vin':vin,'verificationStatus':'Not Found','source':'OWL Coverage Info','customerResult':'VIN not found in OWL Coverage Info'}
-    in_service_date=labeled(text,[r'In[- ]?Service\s+Date',r'Warranty\s+Start\s+Date',r'Inservice\s+Date'])
-    in_service_status=labeled(text,[r'In[- ]?Service\s+Status',r'Warranty\s+Status'])
-    mileage=labeled(text,[r'Mileage',r'Odometer'])
-    customer=labeled(text,[r'Registered\s+Customer\s+Name',r'Customer\s+Name',r'Owner\s+Name'])
-    account=labeled(text,[r'Registered\s+Customer\s+Account',r'Customer\s+Account'])
-    warranty_status=labeled(text,[r'Warranty\s+Status',r'Coverage\s+Status'])
-    return {'vin':vin,'verificationStatus':'Verified','inServiceStatus':in_service_status or ('In Service' if in_service_date else ''),'inServiceDate':in_service_date,'mileage':mileage,'customerResult':customer,'customerName':customer,'registeredCustomerName':customer,'registeredCustomerAccount':account,'warrantyStatus':warranty_status,'warrantyCoverage':text[:12000],'source':'OWL Coverage Info'}
+    page, frame = submit_vin(context, vin)
+    inject_hint(page, f'Diehl VIN: validating Coverage Info for {vin}')
+    h = harvest(frame)
+    text = h.get('text') or ''
+    if page_has_explicit_not_found(text):
+        return {'vin': vin, 'verificationStatus': 'Not Found', 'source': 'OWL Coverage Info', 'customerResult': 'VIN not found in OWL Coverage Info'}
+    if not page_confirms_vin(h, vin):
+        raise RuntimeError(f'OWL Coverage Info did not show VIN {vin} after lookup; refusing to attach another vehicle\'s data.')
+
+    in_service_date = pick(h, [r'In[- ]?Service\s+Date', r'Inservice\s+Date', r'Warranty\s+Start\s+Date'])
+    in_service_status = pick(h, [r'In[- ]?Service\s+Status', r'Inservice\s+Status'])
+    mileage = pick(h, [r'Mileage', r'Odometer', r'In[- ]?Service\s+Miles'])
+    customer = pick(h, [r'Registered\s+Customer\s+Name', r'Customer\s+Name', r'Owner\s+Name'])
+    account = pick(h, [r'Registered\s+Customer\s+Account', r'Customer\s+Account', r'Account\s+Number'])
+    model = pick(h, [r'Base\s+Model', r'Product\s+Model', r'Vehicle\s+Model', r'Model'])
+    serial = pick(h, [r'Product\s+S/N', r'Product\s+Serial', r'VIN'])
+    build_date = pick(h, [r'Build\s+Date', r'Manufactur(?:e|ed)\s+Date'])
+    warranty_status = pick(h, [r'Warranty\s+Status', r'Coverage\s+Status'])
+    cov_rows = coverage_rows(h)
+    summary = '\n'.join(' | '.join(row) for row in cov_rows)
+
+    if not in_service_status:
+        if in_service_date:
+            in_service_status = 'In Service'
+        elif re.search(r'not\s+in\s+service|not\s+registered', text, re.I):
+            in_service_status = 'Not In Service'
+
+    result = {
+        'vin': vin,
+        'verificationStatus': 'Verified',
+        'productSerialNumber': serial or vin,
+        'vehicleModel': model,
+        'buildDate': build_date,
+        'inServiceStatus': in_service_status,
+        'inServiceDate': in_service_date,
+        'mileage': mileage,
+        'customerResult': customer,
+        'customerName': customer,
+        'registeredCustomerName': customer,
+        'registeredCustomerAccount': account,
+        'warrantyStatus': warranty_status,
+        'warrantyCoverage': summary,
+        'coverageRecordsJson': json.dumps(cov_rows, ensure_ascii=False),
+        'coverageFieldsJson': json.dumps(h.get('fields') or {}, ensure_ascii=False),
+        'source': 'OWL Coverage Info + Major Components',
+    }
+    log(f'OWL Coverage {vin}: in-service={in_service_date or "blank"}; status={in_service_status or "blank"}; customer={customer or "blank"}; coverage rows={len(cov_rows)}')
+    return result
 
 
-def major_components_lookup(context, vin: str) -> dict[str, str]:
+def major_components_lookup(context, vin: str) -> dict[str, Any]:
     open_owl_url(context, OWL_MAJOR_COMPONENTS_URL, 'Major Components')
-    page,frame=submit_vin(context,vin); inject_hint(page,f'Diehl VIN: reading Major Components for {vin}')
-    text=body_text(frame); rows=table_rows(frame)
-    engine=extract_serial_from_rows(rows,[r'engine']) or labeled(text,[r'Engine\s+Serial(?:\s+Number|\s+No\.?)?',r'Engine\s+S/N'])
-    allison=extract_serial_from_rows(rows,[r'allison']) or labeled(text,[r'Allison(?:\s+Transmission)?\s+Serial(?:\s+Number|\s+No\.?)?',r'Allison\s+S/N'])
-    return {'engineSerialNumber':engine,'allisonTransmissionSerialNumber':allison,'majorComponentsText':text[:8000]}
+    page, frame = submit_vin(context, vin)
+    inject_hint(page, f'Diehl VIN: validating Major Components for {vin}')
+    h = harvest(frame)
+    if page_has_explicit_not_found(h.get('text') or ''):
+        raise RuntimeError(f'OWL Major Components reported VIN {vin} was not found after Coverage Info had verified it.')
+    if not page_confirms_vin(h, vin):
+        raise RuntimeError(f'OWL Major Components did not show VIN {vin}; refusing to attach component data to the wrong vehicle.')
+
+    records = component_records(h)
+    engine_serial = serial_from_records(records, r'engine') or pick(h, [r'Engine\s+Serial(?:\s+Number|\s+No\.?)?', r'Engine\s+S/N'])
+    allison_serial = serial_from_records(records, r'allison|transmission') or pick(h, [r'Allison(?:\s+Transmission)?\s+Serial(?:\s+Number|\s+No\.?)?', r'Transmission\s+Serial', r'Allison\s+S/N'])
+    engine_model = model_from_records(records, r'engine') or pick(h, [r'Engine\s+Model'])
+    transmission_model = model_from_records(records, r'allison|transmission') or pick(h, [r'Transmission\s+Model', r'Allison\s+Model'])
+    summary = '\n'.join(' | '.join(clean(v) for v in rec.values()) for rec in records)
+    log(f'OWL Components {vin}: engine={engine_serial or "blank"}; Allison={allison_serial or "blank"}; component rows={len(records)}')
+    return {
+        'engineSerialNumber': engine_serial,
+        'engineModel': engine_model,
+        'allisonTransmissionSerialNumber': allison_serial,
+        'transmissionModel': transmission_model,
+        'majorComponentsText': summary,
+        'majorComponentsJson': json.dumps(records, ensure_ascii=False),
+        'majorComponentFieldsJson': json.dumps(h.get('fields') or {}, ensure_ascii=False),
+    }
 
 
 def lookup_one(context, vin: str) -> dict[str, Any]:
-    coverage=coverage_lookup(context,vin)
-    if coverage.get('verificationStatus')=='Not Found': return coverage
-    result={**coverage,**major_components_lookup(context,vin)}
-    log(f'OWL {vin}: in-service={result.get("inServiceDate") or "blank"}; engine={result.get("engineSerialNumber") or "blank"}; allison={result.get("allisonTransmissionSerialNumber") or "blank"}')
+    coverage = coverage_lookup(context, vin)
+    if coverage.get('verificationStatus') == 'Not Found':
+        return coverage
+    components = major_components_lookup(context, vin)
+    result = {**coverage, **components}
+    result['verificationStatus'] = 'Verified'
+    result['source'] = 'OWL Coverage Info + Major Components'
+    log(f'OWL COMPLETE {vin}: in-service={result.get("inServiceDate") or "blank"}; engine={result.get("engineSerialNumber") or "blank"}; Allison={result.get("allisonTransmissionSerialNumber") or "blank"}')
     return result
 
 
 def main() -> int:
     if not VINS:
-        RESULT.write_text('{}',encoding='utf-8'); return 0
-    out: dict[str,Any]={}
+        RESULT.write_text('{}', encoding='utf-8')
+        return 0
+    out: dict[str, Any] = {}
     with sync_playwright() as p:
-        context=launch_context(p)
+        context = launch_context(p)
         try:
-            page=context.pages[0] if context.pages else context.new_page()
-            page.goto(OWL_SIGNON_URL,wait_until='domcontentloaded',timeout=120_000)
-            inject_hint(page,'Diehl VIN: OWL opened. Complete Freightliner login/MFA if requested.')
+            page = context.pages[0] if context.pages else context.new_page()
+            page.goto(OWL_SIGNON_URL, wait_until='domcontentloaded', timeout=120_000)
+            inject_hint(page, 'Diehl VIN: OWL opened. Complete Freightliner login/MFA if requested.')
             wait_logged_in(context)
             for vin in VINS:
-                try: out[vin]=lookup_one(context,vin)
+                try:
+                    out[vin] = lookup_one(context, vin)
                 except Exception as exc:
-                    log(f'OWL lookup failed for {vin}: {exc}'); out[vin]={'vin':vin,'_error':str(exc),'source':'OWL'}
+                    log(f'OWL lookup failed for {vin}: {exc}')
+                    out[vin] = {'vin': vin, '_error': str(exc), 'source': 'OWL'}
         finally:
-            try: context.close()
-            except Exception: pass
-    RESULT.write_text(json.dumps(out,indent=2,ensure_ascii=False),encoding='utf-8'); return 0
+            try:
+                context.close()
+            except Exception:
+                pass
+    RESULT.write_text(json.dumps(out, indent=2, ensure_ascii=False), encoding='utf-8')
+    return 0
 
 
-if __name__=='__main__':
-    try: raise SystemExit(main())
+if __name__ == '__main__':
+    try:
+        raise SystemExit(main())
     except Exception as exc:
-        log(f'FATAL OWL LOOKUP ERROR: {exc}'); RESULT.write_text(json.dumps({'_error':str(exc)}),encoding='utf-8'); raise
+        log(f'FATAL OWL LOOKUP ERROR: {exc}')
+        RESULT.write_text(json.dumps({'_error': str(exc)}), encoding='utf-8')
+        raise
