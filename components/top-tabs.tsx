@@ -11,16 +11,16 @@ const tabs = [
   { href: '/database', label: 'Database' },
 ];
 
-const LATEST_WORKER_VERSION = '5.15';
-const LATEST_WORKER_UPDATED = '08/19/2026 2:55 PM ET';
+const LATEST_WORKER_VERSION = '5.16';
+const LATEST_WORKER_UPDATED = '08/19/2026 3:22 PM ET';
 const RELEASE_NOTES = [
-  'Fixes VIN checks getting stuck at queued / 0%: starting a new VIN run now clears abandoned older queued/running batches so the newest OWL job starts immediately.',
-  'Coverage Info is the authoritative source for In Service Date, In Service Distance/Mileage, Make, Base Model, Model, build/order/PDI dates, and warranty/extended coverage.',
-  'Major Components uses Chassis S/N and waits for the matching populated component table before extracting anything.',
-  'Cummins/engine serial is taken only from ENGINE → Component S/N. Allison serial is taken only from MAIN TRANSMISSION → Component S/N when MFG is ALI/Allison.',
-  'Product Registration is now the authoritative source for registered and ordered customer account/name plus address, city, state, ZIP, phone, and email.',
+  'Fixes Start OWL Check appearing to do nothing: a newly submitted VIN batch now launches immediately in its own local execution thread instead of waiting for the legacy background scheduler.',
+  'The VIN is moved to running immediately and the live OWL lookup is started for that exact batch.',
+  'Abandoned older queued/running batches are still cancelled automatically so they cannot block a fresh VIN lookup.',
+  'Coverage Info remains the authoritative source for In Service Date, In Service Distance/Mileage, Make, Base Model, Model, build/order/PDI dates, and warranty/extended coverage.',
+  'Major Components uses Chassis S/N and exact ENGINE / MAIN TRANSMISSION rows for Cummins and Allison data.',
+  'Product Registration is the authoritative source for registered and ordered customer account/name plus address, city, state, ZIP, phone, and email.',
   'Starting or restarting the worker does not open another Diehl VIN Platform website tab; keep using the tab already open.',
-  'There is no fixed one-second delay; the worker reacts as soon as OWL has actually populated stable result data.',
 ];
 
 export function TopTabs() {
@@ -63,7 +63,7 @@ export function TopTabs() {
             </div>
 
             <div style={{padding:'18px 22px 8px'}}>
-              <p style={{margin:'0 0 12px',color:'#475467',fontSize:14}}>This release fixes OWL jobs that could remain queued and locks the data sources to the exact OWL pages confirmed during testing.</p>
+              <p style={{margin:'0 0 12px',color:'#475467',fontSize:14}}>This release changes Start OWL Check from a queued scheduler handoff to an immediate local execution path, while preserving the exact OWL data mappings already confirmed.</p>
               <ul style={{margin:'0 0 8px',paddingLeft:22,color:'#344054',fontSize:14,lineHeight:1.55}}>
                 {RELEASE_NOTES.map((note) => <li key={note} style={{marginBottom:8}}>{note}</li>)}
               </ul>
