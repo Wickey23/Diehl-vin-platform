@@ -213,6 +213,17 @@ def coverage_lookup(context, vin: str) -> dict[str, Any]:
     }
 
 
+def _normalize_component_mfg(code: str, component: str) -> str:
+    raw = core.clean(code)
+    c = core.canon(raw)
+    comp = core.canon(component)
+    if comp == 'ENGINE' and c in {'CUM', 'CUMMINS'}:
+        return 'Cummins'
+    if 'TRANSMISSION' in comp and c in {'ALI', 'ALLISON'}:
+        return 'Allison'
+    return raw
+
+
 def major_lookup(context, vin: str) -> dict[str, Any]:
     core.open_url(context, core.OWL_MAJOR_URL, 'Major Components')
     frame = _submit_and_wait(context, vin, 'Major Components')
@@ -238,17 +249,44 @@ def major_lookup(context, vin: str) -> dict[str, Any]:
         raise RuntimeError(f'Major Components: VIN {vin} populated the vehicle header, but the Component / MFG / Model / Component S/N table did not populate.')
 
     engine_row = None
-    allison_row = None
+    transmission_row = None
     for row in rows:
         component = core.canon(core.record_value(row, 'Component'))
-        mfg = core.canon(core.record_value(row, 'MFG'))
         if engine_row is None and component == 'ENGINE':
             engine_row = row
-        if allison_row is None and ('ALLISON' in component or 'TRANSMISSION' in component or 'ALLISON' in mfg):
-            allison_row = row
+        # The live OWL page uses MAIN TRANSMISSION. Prefer it explicitly; only
+        # fall back to another transmission row if MAIN TRANSMISSION is absent.
+        if component == 'MAIN TRANSMISSION':
+            transmission_row = row
+        elif transmission_row is None and 'TRANSMISSION' in component:
+            transmission_row = row
 
     def row_field(row: dict[str, str] | None, header: str) -> str:
         return core.record_value(row or {}, header)
+
+    engine_component = row_field(engine_row, 'Component')
+    engine_mfg_code = row_field(engine_row, 'MFG')
+    engine_model = row_field(engine_row, 'Model')
+    engine_serial = row_field(engine_row, 'Component S/N')
+
+    transmission_component = row_field(transmission_row, 'Component')
+    transmission_mfg_code = row_field(transmission_row, 'MFG')
+    transmission_model = row_field(transmission_row, 'Model')
+    transmission_serial = row_field(transmission_row, 'Component S/N')
+
+    engine_manufacturer = _normalize_component_mfg(engine_mfg_code, engine_component)
+    transmission_manufacturer = _normalize_component_mfg(transmission_mfg_code, transmission_component)
+
+    # If OWL says this is an Allison (ALI) main transmission, that Component S/N
+    # is the Allison serial number. No other row may populate the Allison field.
+    is_allison = core.canon(transmission_mfg_code) in {'ALI', 'ALLISON'}
+    allison_serial = transmission_serial if is_allison else ''
+
+    core.log(
+        f'OWL {vin}: Major Components exact mapping: '
+        f'engine={engine_manufacturer or engine_mfg_code}/{engine_model or "blank"}/{engine_serial or "blank"}; '
+        f'transmission={transmission_manufacturer or transmission_mfg_code}/{transmission_model or "blank"}/{transmission_serial or "blank"}'
+    )
 
     return {
         'vehicleModel': vehicle_model,
@@ -258,12 +296,17 @@ def major_lookup(context, vin: str) -> dict[str, Any]:
         'vocation': vocation,
         'wheelbase': wheelbase,
         'gvwr': gvwr,
-        'engineSerialNumber': row_field(engine_row, 'Component S/N'),
-        'engineModel': row_field(engine_row, 'Model'),
-        'engineManufacturer': row_field(engine_row, 'MFG'),
-        'allisonTransmissionSerialNumber': row_field(allison_row, 'Component S/N'),
-        'transmissionModel': row_field(allison_row, 'Model'),
-        'transmissionManufacturer': row_field(allison_row, 'MFG'),
+        # ENGINE row -> Component S/N. For CUM/Cummins this is the Cummins serial.
+        'engineSerialNumber': engine_serial,
+        'cumminsSerialNumber': engine_serial if core.canon(engine_mfg_code) in {'CUM', 'CUMMINS'} else '',
+        'engineModel': engine_model,
+        'engineManufacturer': engine_manufacturer,
+        # MAIN TRANSMISSION row -> Component S/N. For ALI/Allison this is the Allison serial.
+        'allisonTransmissionSerialNumber': allison_serial,
+        'allisonSerialNumber': allison_serial,
+        'transmissionSerialNumber': transmission_serial,
+        'transmissionModel': transmission_model,
+        'transmissionManufacturer': transmission_manufacturer,
         'majorComponentsText': '\n'.join(' | '.join(f'{k}: {v}' for k, v in row.items() if v) for row in rows),
         'majorComponentsJson': json.dumps(rows, ensure_ascii=False),
         'majorComponentFieldsJson': json.dumps({
@@ -274,6 +317,14 @@ def major_lookup(context, vin: str) -> dict[str, Any]:
             'Vocation': vocation,
             'Wheelbase': wheelbase,
             'GVW': gvwr,
+            'Engine Component': engine_component,
+            'Engine MFG': engine_mfg_code,
+            'Engine Model': engine_model,
+            'Engine Component S/N': engine_serial,
+            'Transmission Component': transmission_component,
+            'Transmission MFG': transmission_mfg_code,
+            'Transmission Model': transmission_model,
+            'Transmission Component S/N': transmission_serial,
         }, ensure_ascii=False),
     }
 
