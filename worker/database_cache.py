@@ -62,6 +62,9 @@ def vin_mapping() -> dict[str, str]:
     return {
         'vin': 'VIN',
         'verificationStatus': 'Verification Status',
+        'productSerialNumber': 'Product Serial Number',
+        'vehicleModel': 'Vehicle Model',
+        'buildDate': 'Build Date',
         'inServiceStatus': 'In-Service Status',
         'inServiceDate': 'In-Service Date',
         'mileage': 'Mileage',
@@ -72,9 +75,15 @@ def vin_mapping() -> dict[str, str]:
         'orderedCustomerName': 'Ordered Customer Name',
         'warrantyStatus': 'Warranty Status',
         'warrantyCoverage': 'Warranty / Coverage Details',
+        'coverageRecordsJson': 'Coverage Records JSON',
+        'coverageFieldsJson': 'Coverage Fields JSON',
         'engineSerialNumber': 'Engine Serial Number',
+        'engineModel': 'Engine Model',
         'allisonTransmissionSerialNumber': 'Allison Transmission Serial Number',
+        'transmissionModel': 'Transmission Model',
         'majorComponentsText': 'Major Components Details',
+        'majorComponentsJson': 'Major Components JSON',
+        'majorComponentFieldsJson': 'Major Component Fields JSON',
         'source': 'Source',
     }
 
