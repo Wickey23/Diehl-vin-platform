@@ -11,15 +11,17 @@ const tabs = [
   { href: '/database', label: 'Database' },
 ];
 
-const LATEST_WORKER_VERSION = '5.11';
-const LATEST_WORKER_UPDATED = '08/19/2026 11:38 AM ET';
+const LATEST_WORKER_VERSION = '5.12';
+const LATEST_WORKER_UPDATED = '08/19/2026 11:51 AM ET';
 const RELEASE_NOTES = [
-  'Fixed OWL VIN entry so the worker will never use the left Quick Search box.',
-  'The worker now accepts only the main-content Product S/N input and verifies its screen position before typing.',
-  'VIN entry is typed, verified, held for one full second, verified again, then Tab is pressed.',
-  'Fixed the startup version check that caused v5.10 to fail with “Unexpected worker version started”.',
-  'Coverage Info and Major Components must each confirm the submitted VIN before any result is accepted.',
-  'In-service, warranty, customer, engine, Allison, model and structured OWL audit data are still written and verified in Excel.',
+  'VIN In-Service is faster: the fixed one-second wait after Product S/N entry has been removed.',
+  'The worker now waits for an actual OWL main-form data change after Tab instead of treating the VIN still in the input box as a completed result.',
+  'Removed fuzzy page-text mapping that could return values such as Template Name as Customer or ENGINE as a serial number.',
+  'Coverage values are accepted only from explicitly mapped labels. If an OWL field is not mapped exactly, it stays blank instead of being guessed.',
+  'Major Components now maps the exact table columns Component, MFG, Model, and Component S/N.',
+  'Engine serial is read only from Component S/N on the ENGINE row; Allison serial is read only from the ALLISON/TRANSMISSION row.',
+  'Major Components also captures exact Make/Base/Model, Chassis S/N, In Service Date, Unit #, Vocation, Wheelbase, and GVW values.',
+  'Excel/database persistence now includes the additional exact component and chassis fields.',
 ];
 
 export function TopTabs() {
@@ -36,47 +38,11 @@ export function TopTabs() {
 
         <div
           aria-label={`Latest worker v${LATEST_WORKER_VERSION}, updated ${LATEST_WORKER_UPDATED}`}
-          style={{
-            display:'flex',
-            alignItems:'center',
-            gap:9,
-            marginLeft:'auto',
-            padding:'7px 10px',
-            border:'1px solid #f5c26b',
-            borderRadius:9,
-            background:'#fff8e7',
-            color:'#7a4b00',
-            fontSize:12,
-            lineHeight:1.25,
-            whiteSpace:'nowrap',
-          }}
+          style={{display:'flex',alignItems:'center',gap:9,marginLeft:'auto',padding:'7px 10px',border:'1px solid #f5c26b',borderRadius:9,background:'#fff8e7',color:'#7a4b00',fontSize:12,lineHeight:1.25,whiteSpace:'nowrap'}}
         >
           <span style={{width:7,height:7,borderRadius:'50%',background:'#f59e0b',display:'inline-block',flex:'0 0 auto'}} />
           <span><b>Latest Worker v{LATEST_WORKER_VERSION}</b>{' · '}Updated {LATEST_WORKER_UPDATED}</span>
-          <button
-            type="button"
-            onClick={() => setShowUpdateInfo(true)}
-            aria-label="What's new in this worker update"
-            title="What's new in this update"
-            style={{
-              width:20,
-              height:20,
-              borderRadius:'50%',
-              border:'1px solid #d99a24',
-              background:'#fff',
-              color:'#7a4b00',
-              fontSize:12,
-              fontWeight:900,
-              lineHeight:'18px',
-              padding:0,
-              cursor:'pointer',
-              display:'inline-flex',
-              alignItems:'center',
-              justifyContent:'center',
-            }}
-          >
-            i
-          </button>
+          <button type="button" onClick={() => setShowUpdateInfo(true)} aria-label="What's new in this worker update" title="What's new in this update" style={{width:20,height:20,borderRadius:'50%',border:'1px solid #d99a24',background:'#fff',color:'#7a4b00',fontSize:12,fontWeight:900,lineHeight:'18px',padding:0,cursor:'pointer',display:'inline-flex',alignItems:'center',justifyContent:'center'}}>i</button>
           <a href="/api/download-worker" style={{fontWeight:800,color:'#7a4b00',textDecoration:'underline',textUnderlineOffset:2}} title="Download the latest local worker package">Download update</a>
         </div>
 
@@ -89,30 +55,8 @@ export function TopTabs() {
       </header>
 
       {showUpdateInfo && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="worker-update-title"
-          onMouseDown={(e) => { if (e.target === e.currentTarget) setShowUpdateInfo(false); }}
-          style={{
-            position:'fixed',
-            inset:0,
-            zIndex:9999,
-            background:'rgba(16,24,40,.38)',
-            display:'flex',
-            alignItems:'flex-start',
-            justifyContent:'center',
-            padding:'88px 20px 20px',
-          }}
-        >
-          <div style={{
-            width:'min(560px, 100%)',
-            background:'#fff',
-            border:'1px solid #e4e7ec',
-            borderRadius:16,
-            boxShadow:'0 20px 50px rgba(16,24,40,.22)',
-            overflow:'hidden',
-          }}>
+        <div role="dialog" aria-modal="true" aria-labelledby="worker-update-title" onMouseDown={(e) => { if (e.target === e.currentTarget) setShowUpdateInfo(false); }} style={{position:'fixed',inset:0,zIndex:9999,background:'rgba(16,24,40,.38)',display:'flex',alignItems:'flex-start',justifyContent:'center',padding:'88px 20px 20px'}}>
+          <div style={{width:'min(600px, 100%)',background:'#fff',border:'1px solid #e4e7ec',borderRadius:16,boxShadow:'0 20px 50px rgba(16,24,40,.22)',overflow:'hidden'}}>
             <div style={{display:'flex',justifyContent:'space-between',gap:20,alignItems:'flex-start',padding:'20px 22px 16px',borderBottom:'1px solid #eef2f6'}}>
               <div>
                 <div style={{fontSize:12,fontWeight:800,letterSpacing:.8,color:'#b36a00',marginBottom:5}}>WORKER UPDATE</div>
@@ -123,7 +67,7 @@ export function TopTabs() {
             </div>
 
             <div style={{padding:'18px 22px 8px'}}>
-              <p style={{margin:'0 0 12px',color:'#475467',fontSize:14}}>This update fixes the OWL VIN-entry target and startup version mismatch, while keeping the stricter VIN verification and complete Excel capture.</p>
+              <p style={{margin:'0 0 12px',color:'#475467',fontSize:14}}>This update focuses on making VIN In-Service faster and, more importantly, removing incorrect OWL field guesses.</p>
               <ul style={{margin:'0 0 8px',paddingLeft:22,color:'#344054',fontSize:14,lineHeight:1.55}}>
                 {RELEASE_NOTES.map((note) => <li key={note} style={{marginBottom:8}}>{note}</li>)}
               </ul>
