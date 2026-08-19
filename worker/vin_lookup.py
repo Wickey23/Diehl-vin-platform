@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-OWL = ROOT / 'owl_lookup.py'
+OWL = ROOT / 'owl_lookup_v2.py'
 RESULT = Path(os.environ.get('DIEHL_RESULT_FILE', str(ROOT / 'vin-results.json')))
 VINS = [x.strip().upper() for x in os.environ.get('DIEHL_VINS', '').splitlines() if x.strip()]
 
@@ -18,7 +18,7 @@ def main() -> int:
         return 0
 
     if not OWL.exists():
-        raise RuntimeError('OWL VIN In-Service automation is not installed. Download the current worker package.')
+        raise RuntimeError('Strict OWL VIN In-Service automation is not installed. Download the current worker package.')
 
     python = ROOT / '.venv' / 'Scripts' / 'python.exe'
     exe = python if python.exists() else Path(sys.executable)
