@@ -57,7 +57,29 @@ def iter_frames(context):
 
 def body_text(frame) -> str:
     try:
-        return frame.locator('body').inner_text(timeout=1500)
+        return frame.locator('body').inner_text(timeout=1200)
+    except Exception:
+        return ''
+
+
+def main_signature(frame, vin: str = '') -> str:
+    try:
+        return str(frame.evaluate("""({minX,vin}) => {
+          const norm=s=>(s||'').replace(/\s+/g,' ').trim();
+          const pieces=[];
+          for(const el of document.querySelectorAll('td,th,input,select,textarea')){
+            const r=el.getBoundingClientRect();
+            if(!r.width || !r.height || r.left<minX) continue;
+            let value='';
+            if(el.tagName==='INPUT' || el.tagName==='TEXTAREA') value=el.value||'';
+            else if(el.tagName==='SELECT') value=el.options[el.selectedIndex]?.text||el.value||'';
+            else value=el.innerText||el.textContent||'';
+            value=norm(value);
+            if(!value || value.toUpperCase()===vin.toUpperCase()) continue;
+            pieces.push(value);
+          }
+          return pieces.join('|');
+        }""", {'minX': MIN_MAIN_X, 'vin': vin}))
     except Exception:
         return ''
 
@@ -70,7 +92,7 @@ def wait_logged_in(context, timeout: int = 240) -> None:
             url = (frame.url or '').lower()
             if re.search(r'OWL\s+Home|Coverage\s+Info|Major\s+Components|Online\s+Warranty', text, re.I) or ('/iwarranty/' in url and 'signon' not in url):
                 return
-        time.sleep(.25)
+        time.sleep(.2)
     raise RuntimeError('OWL login did not become ready within 4 minutes.')
 
 
@@ -129,12 +151,11 @@ def find_main_product_sn(context, timeout: float = 12.0):
             box = item.bounding_box()
             if box and box['x'] >= MIN_MAIN_X:
                 return page, frame, item
-        time.sleep(.1)
+        time.sleep(.08)
     raise RuntimeError('Could not find the main Product S/N box. Left Quick Search is intentionally ignored.')
 
 
 def exact_label_value(frame, labels: list[str]) -> str:
-    """Read only exact table-label/value relationships. No fuzzy page-text guessing."""
     wanted = [canon(x) for x in labels]
     try:
         return clean(frame.evaluate("""wanted => {
@@ -220,42 +241,50 @@ def submit_vin(context, vin: str):
     actual = clean(field.input_value()).upper()
     if actual != vin:
         field.fill('')
-        field.type(vin, delay=10)
+        field.type(vin, delay=8)
         actual = clean(field.input_value()).upper()
     if actual != vin:
         raise RuntimeError(f'Product S/N did not contain VIN {vin}.')
 
-    # No fixed one-second delay. Trigger OWL immediately, then wait on real page data.
+    before = main_signature(frame, vin)
     field.press('Tab')
     log(f'OWL {vin}: VIN verified in main Product S/N and Tab sent immediately.')
-    return page, frame
+    return page, frame, before
 
 
-def wait_for_result(context, vin: str, page, timeout: float = 15.0):
+def wait_for_result(context, vin: str, page, before_signature: str, timeout: float = 15.0):
     deadline = time.time() + timeout
+    last_signature = before_signature
+    stable_since = None
     while time.time() < deadline:
         if 'quicksearch' in (page.url or '').lower():
             raise RuntimeError('OWL navigated to Quick Search; result rejected.')
         for _page, frame in iter_frames(context):
             text = body_text(frame)
-            normalized = re.sub(r'[^A-Z0-9]', '', text.upper())
-            if vin in normalized:
-                return frame
             if re.search(r'not\s+found|invalid\s+(vin|serial)|no\s+matching', text, re.I):
                 return frame
-        time.sleep(.1)
-    raise RuntimeError(f'OWL did not return data for VIN {vin} within {timeout:g} seconds.')
+            sig = main_signature(frame, vin)
+            if sig and sig != before_signature:
+                if sig == last_signature:
+                    if stable_since is None:
+                        stable_since = time.time()
+                    elif time.time() - stable_since >= .15:
+                        return frame
+                else:
+                    last_signature = sig
+                    stable_since = time.time()
+        time.sleep(.08)
+    raise RuntimeError(f'OWL did not populate new data for VIN {vin} within {timeout:g} seconds.')
 
 
 def coverage_lookup(context, vin: str) -> dict[str, Any]:
     page = open_url(context, OWL_COVERAGE_URL, 'Coverage Info')
-    page, _frame = submit_vin(context, vin)
-    frame = wait_for_result(context, vin, page)
+    page, _frame, before = submit_vin(context, vin)
+    frame = wait_for_result(context, vin, page, before)
     text = body_text(frame)
     if re.search(r'not\s+found|invalid\s+(vin|serial)|no\s+matching', text, re.I):
         return {'vin': vin, 'verificationStatus': 'Not Found', 'customerResult': 'VIN not found in OWL', 'source': 'OWL Coverage Info'}
 
-    # Exact labels only. If OWL uses a different label, leave it blank rather than guess.
     in_service_date = exact_label_value(frame, ['In Service Date', 'In-Service Date'])
     mileage = exact_label_value(frame, ['Mileage', 'In Service Mileage', 'In-Service Mileage', 'In Service Distance', 'In-Service Distance'])
     customer_name = exact_label_value(frame, ['Registered Customer Name', 'Customer Name', 'Registered Customer'])
@@ -296,10 +325,9 @@ def coverage_lookup(context, vin: str) -> dict[str, Any]:
 
 def major_lookup(context, vin: str) -> dict[str, Any]:
     page = open_url(context, OWL_MAJOR_URL, 'Major Components')
-    page, _frame = submit_vin(context, vin)
-    frame = wait_for_result(context, vin, page)
+    page, _frame, before = submit_vin(context, vin)
+    frame = wait_for_result(context, vin, page, before)
 
-    # These exact labels are visible on OWL Major Components.
     chassis_sn = exact_label_value(frame, ['Chassis S/N'])
     vehicle_model = exact_label_value(frame, ['Make/Base/Model'])
     in_service_date = exact_label_value(frame, ['In Service Date'])
@@ -363,13 +391,9 @@ def lookup_one(context, vin: str) -> dict[str, Any]:
         return coverage
     major = major_lookup(context, vin)
     result = {**coverage, **major}
-
-    # OWL Major Components gives an exact chassis In Service Date. Prefer it if present.
     if major.get('inServiceDateFromMajorComponents'):
         result['inServiceDate'] = major['inServiceDateFromMajorComponents']
         result['inServiceStatus'] = 'In Service'
-
-    # Do not expose internal helper field in normal output.
     result.pop('inServiceDateFromMajorComponents', None)
     result['verificationStatus'] = 'Verified'
     log(
