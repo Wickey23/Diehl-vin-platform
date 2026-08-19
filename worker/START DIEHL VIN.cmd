@@ -12,14 +12,15 @@ set "PY312=%LocalAppData%\Programs\Python\Python312\python.exe"
 title Diehl VIN - Setup and Start
 color 0F
 echo ============================================================
-echo  DIEHL VIN - SETUP AND START v5.14
+echo  DIEHL VIN - SETUP AND START v5.15
 echo ============================================================
 echo.
 echo Permanent runtime:
 echo %INSTALLDIR%
 echo.
-echo VIN In-Service: exact OWL Coverage + Major Components flow
+echo VIN In-Service: exact OWL Coverage + Major Components + Product Registration
 echo Coverage uses Product S/N. Major Components uses Chassis S/N.
+echo New VIN runs clear stale queued/running batches before OWL starts.
 echo Website: keeps using your existing Diehl VIN Platform tab.
 echo DTNA Sales Order/AUTO VIN remains a separate workflow.
 echo.
@@ -109,9 +110,11 @@ if not "%RC%"=="0" goto :fail_initializer
 
 echo.
 echo [5/5] SUCCESS
-echo       Diehl VIN v5.14 and Database viewer are running.
+echo       Diehl VIN v5.15 and Database viewer are running.
+echo       Fresh VIN runs clear stale queued/running jobs before OWL launches.
 echo       Coverage: Product S/N -> verify VIN -> Tab -> wait for actual populated fields.
 echo       Major Components: Chassis S/N -> verify VIN -> Tab -> wait for chassis/component table.
+echo       Product Registration: customer identity/account/address/contact fields.
 echo       Your existing Diehl VIN Platform website tab is left open and reused.
 echo.
 timeout /t 2 /nobreak >nul
