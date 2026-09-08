@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
+import os
 import re
+import time
 
 import pandas as pd
 
@@ -11,8 +13,8 @@ from database_cache import write_table
 
 
 # Keep the proven DTNA browser/data flow in dtna_login_and_sync.py.
-# This runtime only patches the integration points that have historically
-# needed help: AUTO VIN selection, last-run timestamping, Excel write/mirror.
+# Patch only the historically fragile integration points:
+# AUTO VIN selection, run timestamping, OneDrive Excel attachment, and mirror.
 try:
     base.PAYLOAD['orderToReview'] = True
 except Exception:
@@ -127,12 +129,110 @@ _original_add_change_notes = base.add_change_notes_to_current_rows
 
 
 def add_change_notes_with_run_time(records: list[dict], changes: list[dict]) -> None:
-    """Use the original proven change-note logic, then stamp this DTNA run time."""
     _original_add_change_notes(records, changes)
     run_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     for row in records:
         row['lastChangeTime'] = run_time
     base.log(f'DTNA lastChangeTime set to {run_time} for all {len(records)} rows.')
+
+
+def _norm_path(value: str | Path) -> str:
+    try:
+        return os.path.normcase(os.path.abspath(str(value))).rstrip('\\/')
+    except Exception:
+        return str(value).lower().rstrip('\\/')
+
+
+def _find_open_workbook(pythoncom, win32com, destination: Path):
+    """Find the real open workbook even when Excel exposes a SharePoint HTTPS FullName."""
+    exact = []
+    same_name = []
+    seen = set()
+
+    def inspect_app(app) -> None:
+        try:
+            count = int(app.Workbooks.Count)
+        except Exception:
+            return
+        for i in range(1, count + 1):
+            try:
+                wb = app.Workbooks.Item(i)
+                name = str(wb.Name or '')
+                full = str(wb.FullName or '')
+                key = (name.casefold(), full.casefold())
+                if key in seen:
+                    continue
+                seen.add(key)
+                if full and _norm_path(full) == _norm_path(destination):
+                    exact.append(wb)
+                elif name.casefold() == destination.name.casefold():
+                    same_name.append(wb)
+            except Exception:
+                continue
+
+    try:
+        inspect_app(win32com.client.GetActiveObject('Excel.Application'))
+    except Exception:
+        pass
+
+    # Walk the Running Object Table because multiple independent Excel instances
+    # can exist and GetActiveObject may point to the wrong one.
+    try:
+        rot = pythoncom.GetRunningObjectTable()
+        enum = rot.EnumRunning()
+        bind = pythoncom.CreateBindCtx(0)
+        while True:
+            monikers = enum.Next(1)
+            if not monikers:
+                break
+            moniker = monikers[0]
+            try:
+                display = moniker.GetDisplayName(bind, None)
+            except Exception:
+                display = ''
+            if 'excel' not in display.lower() and destination.name.lower() not in display.lower():
+                continue
+            try:
+                obj = win32com.client.Dispatch(rot.GetObject(moniker))
+            except Exception:
+                continue
+            try:
+                if hasattr(obj, 'Workbooks'):
+                    inspect_app(obj)
+                elif hasattr(obj, 'Application') and hasattr(obj, 'FullName'):
+                    wb = obj
+                    name = str(wb.Name or '')
+                    full = str(wb.FullName or '')
+                    key = (name.casefold(), full.casefold())
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    if full and _norm_path(full) == _norm_path(destination):
+                        exact.append(wb)
+                    elif name.casefold() == destination.name.casefold():
+                        same_name.append(wb)
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+    if exact:
+        return exact[0]
+
+    # OneDrive/SharePoint often reports an HTTPS FullName even though the worker
+    # knows the synced local path. If exactly one open workbook has the expected
+    # file name, that is the workbook the employee is actually using.
+    unique = []
+    keys = set()
+    for wb in same_name:
+        try:
+            key = (str(wb.Name).casefold(), str(wb.FullName).casefold())
+        except Exception:
+            continue
+        if key not in keys:
+            keys.add(key)
+            unique.append(wb)
+    return unique[0] if len(unique) == 1 else None
 
 
 def _mirror_dataframe(df: pd.DataFrame, destination: Path) -> None:
@@ -154,32 +254,192 @@ def _mirror_dataframe(df: pd.DataFrame, destination: Path) -> None:
         rows.append(item)
 
     write_table(
-        'DTNA',
-        headers,
-        rows,
-        str(destination),
+        'DTNA', headers, rows, str(destination),
         'Fresh DTNA Sales Order + Dealer Reporting AUTO VIN collection',
     )
     base.log(f'Refreshed local website DTNA mirror with {len(rows)} collected rows.')
 
 
-_original_writer = base.write_dataframe_into_same_excel
+def write_dataframe_into_onedrive_excel(df: pd.DataFrame, destination: Path) -> None:
+    """Write DTNA into the exact shared OneDrive workbook the employee has open."""
+    import pythoncom  # type: ignore
+    import win32com.client  # type: ignore
 
-
-def write_dataframe_with_run_time(df: pd.DataFrame, destination: Path) -> None:
-    """Final write guard: stamp every dataframe row before Excel receives it."""
     fixed = df.copy()
     run_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     fixed['lastChangeTime'] = run_time
-    base.log(f'Final DTNA Excel write timestamp: {run_time} for {len(fixed)} rows.')
-    _original_writer(fixed, destination)
-    _mirror_dataframe(fixed, destination)
+
+    destination = destination.resolve()
+    if not destination.exists():
+        raise RuntimeError(f'Shared OneDrive workbook no longer exists: {destination}')
+
+    last_error = None
+    for attempt in range(1, 7):
+        pythoncom.CoInitialize()
+        excel = workbook = None
+        opened_here = created_excel = False
+        try:
+            workbook = _find_open_workbook(pythoncom, win32com, destination)
+            if workbook is not None:
+                excel = workbook.Application
+                base.log(f'Attached to OPEN OneDrive workbook: {workbook.FullName}')
+            else:
+                # No open copy matched. Open the exact synced OneDrive path.
+                excel = win32com.client.DispatchEx('Excel.Application')
+                created_excel = True
+                excel.Visible = False
+                excel.DisplayAlerts = False
+                workbook = excel.Workbooks.Open(
+                    str(destination), UpdateLinks=0, ReadOnly=False,
+                    IgnoreReadOnlyRecommended=True, AddToMru=False,
+                )
+                opened_here = True
+                base.log(f'Opened exact synced OneDrive workbook for DTNA write: {destination}')
+
+            if workbook is None:
+                raise RuntimeError('Excel did not return the shared OneDrive workbook object.')
+            if bool(getattr(workbook, 'ReadOnly', False)):
+                raise RuntimeError('The shared OneDrive workbook is read-only in Excel.')
+
+            excel.DisplayAlerts = False
+            excel.ScreenUpdating = False
+            excel.EnableEvents = False
+            try:
+                excel.Calculation = -4135
+            except Exception:
+                pass
+
+            try:
+                sheet = workbook.Worksheets('DTNA')
+            except Exception:
+                sheet = workbook.Worksheets.Add(After=workbook.Worksheets(workbook.Worksheets.Count))
+                sheet.Name = 'DTNA'
+
+            headers = [str(c) for c in fixed.columns]
+            if not headers:
+                raise RuntimeError('No DTNA columns were available to write.')
+
+            table = None
+            try:
+                for i in range(1, int(sheet.ListObjects.Count) + 1):
+                    candidate = sheet.ListObjects.Item(i)
+                    if str(candidate.Name).strip().lower() in {'dtna', 'dtnadata'}:
+                        table = candidate
+                        break
+            except Exception:
+                table = None
+
+            if table is not None:
+                try:
+                    if table.DataBodyRange is not None:
+                        table.DataBodyRange.ClearContents()
+                    table.HeaderRowRange.ClearContents()
+                except Exception:
+                    pass
+            else:
+                sheet.UsedRange.ClearContents()
+
+            sheet.Range(sheet.Cells(1, 1), sheet.Cells(1, len(headers))).Value2 = tuple(headers)
+
+            rows = []
+            for raw_row in fixed.itertuples(index=False, name=None):
+                safe = []
+                for value in raw_row:
+                    if value is None:
+                        safe.append('')
+                        continue
+                    try:
+                        if pd.isna(value):
+                            safe.append('')
+                            continue
+                    except Exception:
+                        pass
+                    safe.append(str(value))
+                rows.append(tuple(safe))
+
+            block_size = 75
+            for offset in range(0, len(rows), block_size):
+                block = rows[offset:offset + block_size]
+                first_row = offset + 2
+                last_row = first_row + len(block) - 1
+                sheet.Range(sheet.Cells(first_row, 1), sheet.Cells(last_row, len(headers))).Value2 = tuple(block)
+                if offset % 300 == 0:
+                    base.log(f'Writing Excel rows {first_row}-{last_row} of {len(rows) + 1}')
+
+            target_range = sheet.Range(
+                sheet.Cells(1, 1),
+                sheet.Cells(max(2, len(rows) + 1), len(headers)),
+            )
+            if table is not None:
+                try:
+                    table.Resize(target_range)
+                except Exception:
+                    pass
+            else:
+                try:
+                    table = sheet.ListObjects.Add(1, target_range, None, 1)
+                    table.Name = 'DTNAData'
+                except Exception:
+                    pass
+
+            header_lookup = {name: idx + 1 for idx, name in enumerate(headers)}
+            for name in ('statusDate', 'chassisStartDate', 'destRecvDate', 'origProjDelvDate', 'projDelvDate', 'dispatchDate', 'deliveredDate', 'changeNotes'):
+                col = header_lookup.get(name)
+                if col:
+                    sheet.Columns(col).WrapText = True
+                    sheet.Columns(col).ColumnWidth = 24
+            for name, width in {
+                'VIN': 20, 'inServiceDate': 16, 'serialNo': 16,
+                'leadSerialNo': 18, 'customer': 28, 'statusMsg': 22,
+                'lastChangeTime': 20,
+            }.items():
+                col = header_lookup.get(name)
+                if col:
+                    sheet.Columns(col).ColumnWidth = width
+
+            workbook.Save()
+            base.log(f'UPDATED EXACT ONEDRIVE WORKBOOK: {workbook.FullName} -> DTNA')
+            base.log(f'DTNA lastChangeTime written as {run_time} for {len(rows)} rows.')
+            _mirror_dataframe(fixed, destination)
+            return
+
+        except Exception as exc:
+            last_error = exc
+            base.log(f'OneDrive Excel write attempt {attempt}/6 failed: {exc}')
+            if attempt < 6:
+                time.sleep(2)
+        finally:
+            try:
+                if excel is not None:
+                    excel.ScreenUpdating = True
+                    excel.EnableEvents = True
+                    try:
+                        excel.Calculation = -4105
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            try:
+                if workbook is not None and opened_here:
+                    workbook.Close(SaveChanges=True)
+            except Exception:
+                pass
+            try:
+                if excel is not None and created_excel:
+                    excel.Quit()
+            except Exception:
+                pass
+            pythoncom.CoUninitialize()
+
+    raise RuntimeError(
+        'DTNA could not update the shared OneDrive workbook after 6 attempts. '
+        f'Target: {destination}\nDetails: {last_error}'
+    )
 
 
-# These are the same integration hooks used by the proven Aug 18/19 runtime.
 base.select_auto_vin = select_auto_vin
 base.add_change_notes_to_current_rows = add_change_notes_with_run_time
-base.write_dataframe_into_same_excel = write_dataframe_with_run_time
+base.write_dataframe_into_same_excel = write_dataframe_into_onedrive_excel
 
 
 if __name__ == '__main__':
