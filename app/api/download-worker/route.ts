@@ -4,6 +4,7 @@ export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 export const revalidate = 0;
 
+// v5.16.1 canonical package: standard DTNA runtime, no wrapper swapping.
 const REPO = 'Wickey23/Diehl-vin-platform';
 const PACKAGE_VERSION = '5.16.1';
 const PACKAGE_REF = 'main';
