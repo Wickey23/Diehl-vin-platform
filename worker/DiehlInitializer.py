@@ -8,6 +8,7 @@ import subprocess
 import sys
 import time
 import urllib.request
+import webbrowser
 from pathlib import Path
 import tkinter as tk
 from tkinter import messagebox
@@ -20,6 +21,7 @@ CONFIG = ROOT / 'config.json'
 REQUIREMENTS = ROOT / 'requirements.txt'
 WORKER_PING = 'http://127.0.0.1:8765/ping'
 DATABASE_PING = 'http://127.0.0.1:8766/ping'
+WEB_APP_URL = 'https://diehl-vin-platform.vercel.app/'
 LOG_DIR = ROOT / 'logs'
 WORKER_LOG = LOG_DIR / 'worker.log'
 DATABASE_LOG = LOG_DIR / 'database.log'
@@ -192,6 +194,20 @@ def start_services() -> None:
         print('      Database viewer connected on 127.0.0.1:8766.')
 
 
+def open_platform() -> None:
+    print(f'      Opening Diehl VIN Platform: {WEB_APP_URL}')
+    try:
+        opened = webbrowser.open_new_tab(WEB_APP_URL)
+        if opened:
+            print('      Diehl VIN Platform opened in your default browser.')
+        else:
+            os.startfile(WEB_APP_URL)  # type: ignore[attr-defined]
+            print('      Diehl VIN Platform opened in your default browser.')
+    except Exception as exc:
+        print(f'      Website could not be opened automatically: {exc}')
+        print(f'      Open manually: {WEB_APP_URL}')
+
+
 def show_error(message: str) -> None:
     try:
         root = tk.Tk(); root.withdraw(); root.attributes('-topmost', True)
@@ -214,9 +230,6 @@ def main() -> None:
         py = venv_python()
         print('      Switching initialization to verified venv Python...')
         print(f'      Venv Python: {py}')
-        # Re-launch THIS SAME initializer file. Its built-in version/service are
-        # already the current package version, so the venv transition cannot
-        # silently fall back to an older worker implementation.
         result = subprocess.run([str(py), str(Path(__file__).resolve()), '--inside-venv'], cwd=str(ROOT))
         raise SystemExit(result.returncode)
 
@@ -230,7 +243,7 @@ def main() -> None:
     resolve_shared_workbook()
     print('      Starting local worker services...')
     start_services()
-    # The web application is already open. Do not create another website tab.
+    open_platform()
 
 
 if __name__ == '__main__':
