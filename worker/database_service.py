@@ -31,6 +31,7 @@ app.add_middleware(
         'http://localhost:3000',
         'http://127.0.0.1:3000',
     ],
+    allow_origin_regex=r'https://diehl-vin-platform(?:-[a-z0-9-]+)?\.vercel\.app',
     allow_credentials=False,
     allow_methods=['GET', 'POST', 'OPTIONS'],
     allow_headers=['*'],
@@ -169,7 +170,12 @@ def verified_diehl_process(port: int, pid: int) -> bool:
     except Exception:
         return False
     if port == 8765:
-        return 'service_v5.py' in text or 'service_v4.py' in text or 'diehlvinworker' in text
+        return (
+            'service_v7.py' in text
+            or 'service_v5.py' in text
+            or 'service_v4.py' in text
+            or 'diehlvinworker' in text
+        )
     if port == 8766:
         return 'database_service.py' in text or pid == os.getpid()
     return False
