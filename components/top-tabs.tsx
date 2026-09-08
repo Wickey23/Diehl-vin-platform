@@ -11,12 +11,12 @@ const tabs = [
   { href: '/database', label: 'Database' },
 ];
 
-const LATEST_WORKER_VERSION = '5.16.1';
-const LATEST_WORKER_UPDATED = '09/08/2026 2:10 PM ET';
+const LATEST_WORKER_VERSION = '5.16.2';
+const LATEST_WORKER_UPDATED = '09/08/2026 2:23 PM ET';
 const RELEASE_NOTES = [
-  'DTNA last-change metadata is now preserved across syncs instead of being blanked when a truck has no new change in the current run.',
-  'If a previous snapshot does not contain lastChangeTime, the DTNA runtime recovers it from the cumulative DTNA change log.',
-  'If no prior change history exists yet, DTNA writes the current sync time as the baseline lastChangeTime so the Excel column is never left blank.',
+  'DTNA lastChangeTime now means the exact date and time of the latest DTNA run/write.',
+  'Every DTNA row written by the same run receives the same run timestamp, so the column cannot remain blank after a successful sync.',
+  'changeCount and changeNotes continue to represent actual detected DTNA data changes separately from the run timestamp.',
   'The fresh DTNA Sales Order + Dealer Reporting AUTO VIN dataset continues to write to the shared DTNA Excel sheet and refresh the website database mirror.',
   'Start OWL Check still launches a newly submitted VIN batch immediately in its own local execution thread.',
   'Coverage Info, Major Components, and Product Registration mappings remain unchanged.',
@@ -62,7 +62,7 @@ export function TopTabs() {
             </div>
 
             <div style={{padding:'18px 22px 8px'}}>
-              <p style={{margin:'0 0 12px',color:'#475467',fontSize:14}}>This release contains the current DTNA last-change retention fix and the existing immediate OWL execution path.</p>
+              <p style={{margin:'0 0 12px',color:'#475467',fontSize:14}}>This release makes DTNA lastChangeTime the timestamp of the most recent successful DTNA run/write.</p>
               <ul style={{margin:'0 0 8px',paddingLeft:22,color:'#344054',fontSize:14,lineHeight:1.55}}>
                 {RELEASE_NOTES.map((note) => <li key={note} style={{marginBottom:8}}>{note}</li>)}
               </ul>
