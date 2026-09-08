@@ -11,16 +11,15 @@ const tabs = [
   { href: '/database', label: 'Database' },
 ];
 
-const LATEST_WORKER_VERSION = '5.16';
-const LATEST_WORKER_UPDATED = '08/19/2026 3:22 PM ET';
+const LATEST_WORKER_VERSION = '5.16.1';
+const LATEST_WORKER_UPDATED = '09/08/2026 2:10 PM ET';
 const RELEASE_NOTES = [
-  'Fixes Start OWL Check appearing to do nothing: a newly submitted VIN batch now launches immediately in its own local execution thread instead of waiting for the legacy background scheduler.',
-  'The VIN is moved to running immediately and the live OWL lookup is started for that exact batch.',
-  'Abandoned older queued/running batches are still cancelled automatically so they cannot block a fresh VIN lookup.',
-  'Coverage Info remains the authoritative source for In Service Date, In Service Distance/Mileage, Make, Base Model, Model, build/order/PDI dates, and warranty/extended coverage.',
-  'Major Components uses Chassis S/N and exact ENGINE / MAIN TRANSMISSION rows for Cummins and Allison data.',
-  'Product Registration is the authoritative source for registered and ordered customer account/name plus address, city, state, ZIP, phone, and email.',
-  'Starting or restarting the worker does not open another Diehl VIN Platform website tab; keep using the tab already open.',
+  'DTNA last-change metadata is now preserved across syncs instead of being blanked when a truck has no new change in the current run.',
+  'If a previous snapshot does not contain lastChangeTime, the DTNA runtime recovers it from the cumulative DTNA change log.',
+  'If no prior change history exists yet, DTNA writes the current sync time as the baseline lastChangeTime so the Excel column is never left blank.',
+  'The fresh DTNA Sales Order + Dealer Reporting AUTO VIN dataset continues to write to the shared DTNA Excel sheet and refresh the website database mirror.',
+  'Start OWL Check still launches a newly submitted VIN batch immediately in its own local execution thread.',
+  'Coverage Info, Major Components, and Product Registration mappings remain unchanged.',
 ];
 
 export function TopTabs() {
@@ -63,7 +62,7 @@ export function TopTabs() {
             </div>
 
             <div style={{padding:'18px 22px 8px'}}>
-              <p style={{margin:'0 0 12px',color:'#475467',fontSize:14}}>This release changes Start OWL Check from a queued scheduler handoff to an immediate local execution path, while preserving the exact OWL data mappings already confirmed.</p>
+              <p style={{margin:'0 0 12px',color:'#475467',fontSize:14}}>This release contains the current DTNA last-change retention fix and the existing immediate OWL execution path.</p>
               <ul style={{margin:'0 0 8px',paddingLeft:22,color:'#344054',fontSize:14,lineHeight:1.55}}>
                 {RELEASE_NOTES.map((note) => <li key={note} style={{marginBottom:8}}>{note}</li>)}
               </ul>
