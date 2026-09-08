@@ -6,7 +6,7 @@ export const revalidate = 0;
 
 const REPO = 'Wickey23/Diehl-vin-platform';
 const PACKAGE_VERSION = '5.16';
-const PACKAGE_REF = 'fa93e87d3f3ce9be06bb4712b6fb4da70de8d73c';
+const PACKAGE_REF = '31822e94d9b1d46cd66489cfb22a8e6e8a08cf9c';
 const FILES = [
   'worker/START DIEHL VIN.cmd',
   'worker/STOP ALL DIEHL.cmd',
