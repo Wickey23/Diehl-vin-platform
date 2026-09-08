@@ -8,6 +8,7 @@ from pathlib import Path
 import pandas as pd
 
 import dtna_login_and_sync as base
+from database_cache import write_table
 
 
 # Preserve the known-good working program behavior.
@@ -128,21 +129,6 @@ def _norm_path(value: str | Path) -> str:
         return str(value).lower().rstrip('\\/')
 
 
-def _workbook_matches(candidate, destination: Path) -> bool:
-    try:
-        full_name = str(candidate.FullName or '')
-    except Exception:
-        full_name = ''
-    try:
-        name = str(candidate.Name or '')
-    except Exception:
-        name = ''
-
-    if full_name and _norm_path(full_name) == _norm_path(destination):
-        return True
-    return bool(name and name.lower() == destination.name.lower())
-
-
 def _collect_excel_workbooks(pythoncom, win32com, destination: Path):
     """Find the workbook even when Excel exposes a OneDrive/SharePoint URL as FullName."""
     exact = []
@@ -173,9 +159,6 @@ def _collect_excel_workbooks(pythoncom, win32com, destination: Path):
     except Exception:
         pass
 
-    # Excel can have multiple independent instances. Walk the Running Object Table
-    # so an already-open workbook is found even when GetActiveObject points at a
-    # different Excel window.
     try:
         rot = pythoncom.GetRunningObjectTable()
         enum = rot.EnumRunning()
@@ -214,9 +197,7 @@ def _collect_excel_workbooks(pythoncom, win32com, destination: Path):
 
     if exact:
         return exact[0]
-    # OneDrive-backed workbooks can report an https:// SharePoint FullName while
-    # the worker has the local synced path. If there is exactly one open workbook
-    # with the target file name, that is the safe match.
+
     unique = []
     keys = set()
     for wb in same_name:
@@ -230,8 +211,36 @@ def _collect_excel_workbooks(pythoncom, win32com, destination: Path):
     return unique[0] if len(unique) == 1 else None
 
 
+def _mirror_dtna_dataframe(df: pd.DataFrame, destination: Path) -> None:
+    """Publish the exact freshly-collected DTNA dataset to the local website mirror."""
+    headers = [str(c) for c in df.columns]
+    rows: list[dict[str, str]] = []
+    for raw_row in df.itertuples(index=False, name=None):
+        row: dict[str, str] = {}
+        for header, value in zip(headers, raw_row):
+            if value is None:
+                row[header] = ''
+                continue
+            try:
+                if pd.isna(value):
+                    row[header] = ''
+                    continue
+            except Exception:
+                pass
+            row[header] = str(value)
+        rows.append(row)
+    write_table(
+        'DTNA',
+        headers,
+        rows,
+        str(destination),
+        'Fresh DTNA Sales Order + Dealer Reporting AUTO VIN collection',
+    )
+    base.log(f'Refreshed local website DTNA mirror with {len(rows)} collected rows.')
+
+
 def write_dataframe_into_same_excel(df: pd.DataFrame, destination: Path) -> None:
-    """Write DTNA data into the canonical shared workbook without opening a duplicate copy."""
+    """Write DTNA data into the canonical shared workbook and refresh the website mirror."""
     import pythoncom  # type: ignore
     import win32com.client  # type: ignore
 
@@ -365,10 +374,15 @@ def write_dataframe_into_same_excel(df: pd.DataFrame, destination: Path) -> None
 
             workbook.Save()
             base.log(f'Updated shared Excel database successfully: {destination} -> DTNA')
+
+            # Critical: the same freshly collected DTNA dataframe is what the web
+            # database must show. Excel remains the shared destination/history,
+            # not the source of the DTNA collection.
+            _mirror_dtna_dataframe(df, destination)
             return
         except Exception as exc:
             last_error = exc
-            base.log(f'Excel database write attempt {attempt}/6 failed: {exc}')
+            base.log(f'Excel/database write attempt {attempt}/6 failed: {exc}')
             if attempt < 6:
                 time.sleep(2)
         finally:
@@ -395,7 +409,7 @@ def write_dataframe_into_same_excel(df: pd.DataFrame, destination: Path) -> None
             pythoncom.CoUninitialize()
 
     raise RuntimeError(
-        'Excel could not update the shared workbook after 6 attempts. '
+        'DTNA data was collected, but Excel/database publishing failed after 6 attempts. '
         f'Target: {destination}\nDetails: {last_error}'
     )
 
