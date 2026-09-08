@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import re
 import time
+from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
@@ -16,6 +17,34 @@ try:
     base.PAYLOAD['orderToReview'] = True
 except Exception:
     pass
+
+
+DTNA_SCHEMA = [
+    'VIN', 'inServiceDate', 'serialNo', 'leadSerialNo', 'changeCount',
+    'changeNotes', 'lastChangeTime', 'vinSource', 'vinMatchMethod', 'soCode',
+    'baseMdl', 'customer', 'statusMsg', 'statusDate', 'scheduled',
+    'chassisStartDate', 'destRecvDate', 'origProjDelvDate', 'projDelvDate',
+    'dispatchDate', 'deliveredDate', 'errorFlag', 'errorMessage', 'dlrHandshk',
+    'estArrvDate', 'dateInvcPrt', 'mfgRlseDate', 'offlineDate', 'deliverDate',
+    'vehNotSchCat', 'reqDelivery', 'drivableIndc', 'salesperson', 'bldLocation',
+    'qtyOrdered', 'tsoSt', 'tsoNo', 'famCd', 'shCtry', 'vehOrdType',
+    'daysOutActIndc', 'childSerials', 'createTcoUrl', 'orderNotToBeReviewedURL',
+    'salespersonEmailId', 'navAppsByStatus', 'estStartDateCAE', 'estDueDateCAE',
+    'greenDays', 'yellowDays', 'redDays', 'xferSoCd',
+    '_dateHistory.statusDate', '_dateHistory.chassisStartDate',
+    '_dateHistory.destRecvDate', '_dateHistory.origProjDelvDate',
+    '_dateHistory.projDelvDate', '_dateHistory.dispatchDate',
+    '_dateHistory.deliveredDate', 'revPDD', 'delvTrnptrDate', 'caeDaysOut',
+]
+
+
+def _normalize_dtna_schema(df: pd.DataFrame) -> pd.DataFrame:
+    """Keep the shared DTNA worksheet in the historical 62-column layout."""
+    result = df.copy()
+    for column in DTNA_SCHEMA:
+        if column not in result.columns:
+            result[column] = ''
+    return result[DTNA_SCHEMA]
 
 
 def select_auto_vin(page) -> None:
@@ -213,6 +242,7 @@ def _collect_excel_workbooks(pythoncom, win32com, destination: Path):
 
 def _mirror_dtna_dataframe(df: pd.DataFrame, destination: Path) -> None:
     """Publish the exact freshly-collected DTNA dataset to the local website mirror."""
+    df = _normalize_dtna_schema(df)
     headers = [str(c) for c in df.columns]
     rows: list[dict[str, str]] = []
     for raw_row in df.itertuples(index=False, name=None):
@@ -257,11 +287,10 @@ _original_add_change_notes = base.add_change_notes_to_current_rows
 
 
 def preserve_last_change_metadata(records, changes) -> None:
-    """Keep Last Change Time/notes on unchanged rows instead of blanking them every sync."""
+    """Keep DTNA last-change metadata across syncs and establish a baseline when none exists."""
     prior_rows = base.previous_snapshot()
     prior_by_key = {base.row_key(r): r for r in prior_rows}
 
-    # First let the proven base routine mark changes from THIS sync.
     _original_add_change_notes(records, changes)
 
     history_by_serial: dict[str, list[dict]] = {}
@@ -278,12 +307,16 @@ def preserve_last_change_metadata(records, changes) -> None:
         except Exception as exc:
             base.log(f'Could not read DTNA change history while restoring last-change metadata: {exc}')
 
-    current_changed = {base.norm_serial(c.get('serialNo')) for c in changes if base.norm_serial(c.get('serialNo'))}
+    current_changed = {
+        base.norm_serial(c.get('serialNo'))
+        for c in changes
+        if base.norm_serial(c.get('serialNo'))
+    }
+    baseline_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
     for row in records:
         serial = base.norm_serial(row.get('serialNo'))
         if serial in current_changed:
-            # A real change happened now, so the base routine's fresh timestamp wins.
             continue
 
         prior = prior_by_key.get(base.row_key(row), {})
@@ -293,12 +326,14 @@ def preserve_last_change_metadata(records, changes) -> None:
 
         history = history_by_serial.get(serial, [])
         latest = history[-1] if history else None
+        recovered_time = prior_time or (base.clean(latest.get('changeTime')) if latest else '')
+        recovered_notes = prior_notes or (_change_note(latest) if latest else '')
 
         if not base.clean(row.get('lastChangeTime')):
-            row['lastChangeTime'] = prior_time or (base.clean(latest.get('changeTime')) if latest else '')
+            row['lastChangeTime'] = recovered_time or baseline_time
 
         if not base.clean(row.get('changeNotes')):
-            row['changeNotes'] = prior_notes or (_change_note(latest) if latest else '')
+            row['changeNotes'] = recovered_notes
 
         if not base.clean(row.get('changeCount')) or base.clean(row.get('changeCount')) == '0':
             if prior_count and prior_count != '0':
@@ -314,6 +349,7 @@ def write_dataframe_into_same_excel(df: pd.DataFrame, destination: Path) -> None
     import pythoncom  # type: ignore
     import win32com.client  # type: ignore
 
+    df = _normalize_dtna_schema(df)
     destination = destination.resolve()
     if not destination.exists():
         raise RuntimeError(f'Shared workbook no longer exists: {destination}')
@@ -432,12 +468,18 @@ def write_dataframe_into_same_excel(df: pd.DataFrame, destination: Path) -> None
                     pass
 
             header_lookup = {name: idx + 1 for idx, name in enumerate(headers)}
-            for name in ('statusDate', 'chassisStartDate', 'destRecvDate', 'origProjDelvDate', 'projDelvDate', 'dispatchDate', 'deliveredDate', 'changeNotes'):
+            for name in (
+                'statusDate', 'chassisStartDate', 'destRecvDate', 'origProjDelvDate',
+                'projDelvDate', 'dispatchDate', 'deliveredDate', 'changeNotes'
+            ):
                 col = header_lookup.get(name)
                 if col:
                     sheet.Columns(col).WrapText = True
                     sheet.Columns(col).ColumnWidth = 24
-            for name, width in {'VIN': 20, 'inServiceDate': 16, 'serialNo': 16, 'leadSerialNo': 18, 'customer': 28, 'statusMsg': 22, 'lastChangeTime': 20}.items():
+            for name, width in {
+                'VIN': 20, 'inServiceDate': 16, 'serialNo': 16, 'leadSerialNo': 18,
+                'customer': 28, 'statusMsg': 22, 'lastChangeTime': 20
+            }.items():
                 col = header_lookup.get(name)
                 if col:
                     sheet.Columns(col).ColumnWidth = width
