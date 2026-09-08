@@ -11,14 +11,14 @@ from fastapi.routing import APIRoute
 
 import service_v5 as service
 
-# v5.16.1 starts each new VIN batch immediately in a dedicated local execution
+# v5.16.2 starts each new VIN batch immediately in a dedicated local execution
 # thread. This bypasses stale/failed scheduler state that could leave a newly
 # submitted VIN stuck at queued / 0% without ever opening OWL.
-service.base.VERSION = '5.16.1'
+service.base.VERSION = '5.16.2'
 
 # Employees can use the stable production hostname or a Vercel deployment/branch
 # alias. Permit only Diehl VIN Platform Vercel origins plus local development.
-# Adding this middleware at the current v5.16.1 entry point keeps older service
+# Adding this middleware at the current v5.16.2 entry point keeps older service
 # layers compatible without opening the local worker to arbitrary websites.
 service.base.app.add_middleware(
     CORSMiddleware,
@@ -156,8 +156,6 @@ def create_fresh_batch(body: service.base.BatchIn):
     options = {'workers': 1, 'batchSize': max(1, body.batchSize), 'execution': 'direct'}
     c = service.base.conn()
     try:
-        # Retire abandoned batches from older worker runs so they cannot interfere
-        # with resumable state or the old background scheduler.
         stale = c.execute("select id from batches where status in ('queued','running','paused','direct_running')").fetchall()
         for row in stale:
             old_id = row['id']
