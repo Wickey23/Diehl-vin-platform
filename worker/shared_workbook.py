@@ -49,15 +49,35 @@ def is_target(path: Path | str | None) -> bool:
         return False
 
 
+def _is_inside(path: Path, root: Path) -> bool:
+    try:
+        path_abs = Path(os.path.abspath(str(path)))
+        root_abs = Path(os.path.abspath(str(root)))
+        return os.path.commonpath([str(path_abs), str(root_abs)]) == str(root_abs)
+    except Exception:
+        return False
+
+
+def is_onedrive_target(path: Path | str | None, roots: list[Path] | None = None) -> bool:
+    if not is_target(path):
+        return False
+    p = Path(path)
+    roots = roots if roots is not None else onedrive_roots()
+    return any(_is_inside(p, root) for root in roots)
+
+
 def find_shared_workbook(cached_path: str | Path | None = None) -> Path:
-    # Fast path: reuse the prior resolved sync location if it is still the exact shared workbook.
-    if is_target(cached_path):
+    roots = onedrive_roots()
+
+    # Reuse a cached path ONLY when it is still the exact workbook and is inside
+    # one of the detected OneDrive roots. This prevents an old local copy from
+    # silently becoming the DTNA write target.
+    if is_onedrive_target(cached_path, roots):
         return Path(cached_path)
 
-    roots = onedrive_roots()
     matches: list[Path] = []
 
-    # Check the roots themselves first, then exact-name recursive matches.
+    # Check the OneDrive roots themselves first, then exact-name recursive matches.
     for root in roots:
         direct = root / WORKBOOK_NAME
         if direct.exists() and direct.is_file():
@@ -84,10 +104,17 @@ def find_shared_workbook(cached_path: str | Path | None = None) -> Path:
         )
 
     roots_text = '\n'.join(f' - {p}' for p in roots) if roots else ' - No OneDrive sync root was detected.'
+    cached_text = str(cached_path or '').strip()
+    cached_note = ''
+    if cached_text and is_target(cached_text):
+        cached_note = (
+            f'\n\nIgnored cached workbook because it is not inside a detected OneDrive root:\n - {cached_text}'
+        )
+
     raise RuntimeError(
         f'{WORKBOOK_NAME} was not found in this PC\'s synced OneDrive folders.\n\n'
         'Open OneDrive/SharePoint and sync the Diehl shared folder that contains the workbook, then press START DIEHL VIN again.\n\n'
-        f'Searched:\n{roots_text}'
+        f'Searched:\n{roots_text}{cached_note}'
     )
 
 
