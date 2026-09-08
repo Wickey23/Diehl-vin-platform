@@ -4,9 +4,9 @@ export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 export const revalidate = 0;
 
-// v5.16.1 canonical package: standard DTNA runtime, no wrapper swapping.
+// v5.16.2 canonical package: standard DTNA runtime, no wrapper swapping.
 const REPO = 'Wickey23/Diehl-vin-platform';
-const PACKAGE_VERSION = '5.16.1';
+const PACKAGE_VERSION = '5.16.2';
 const PACKAGE_REF = 'main';
 const FILES = [
   'worker/START DIEHL VIN.cmd',
@@ -52,41 +52,45 @@ export async function GET() {
     const baseInitializer = get('DiehlInitializer.py');
     const wrapperInitializer = get('DiehlInitializer_v514.py');
     const service = get('service_v7.py');
+    const dtnaRuntime = get('dtna_runtime.py');
 
-    if (!launcher.includes('SETUP AND START v5.16.1')) throw new Error('Launcher is not v5.16.1.');
+    if (!launcher.includes('SETUP AND START v5.16.2')) throw new Error('Launcher is not v5.16.2.');
     if (!stopper.includes('service_v7\\.py')) throw new Error('STOP ALL does not recognize service_v7.py.');
     if (!baseInitializer.includes("SERVICE = ROOT / 'service_v7.py'")) throw new Error('Base initializer is not routed to service_v7.py.');
-    if (!baseInitializer.includes("EXPECTED_WORKER_VERSION = '5.16.1'")) throw new Error('Base initializer is not locked to v5.16.1.');
-    if (!wrapperInitializer.includes("EXPECTED_WORKER_VERSION = '5.16.1'")) throw new Error('Wrapper initializer is not v5.16.1.');
-    if (!service.includes("service.base.VERSION = '5.16.1'")) throw new Error('Service is not v5.16.1.');
+    if (!baseInitializer.includes("EXPECTED_WORKER_VERSION = '5.16.2'")) throw new Error('Base initializer is not locked to v5.16.2.');
+    if (!wrapperInitializer.includes("EXPECTED_WORKER_VERSION = '5.16.2'")) throw new Error('Wrapper initializer is not v5.16.2.');
+    if (!service.includes("service.base.VERSION = '5.16.2'")) throw new Error('Service is not v5.16.2.');
+    if (!dtnaRuntime.includes("row['lastChangeTime'] = run_time")) throw new Error('DTNA run-time stamping fix is missing.');
 
     const zip = new JSZip();
-    const folder = zip.folder('Diehl_VIN_Local_Worker_v5_16_1');
+    const folder = zip.folder('Diehl_VIN_Local_Worker_v5_16_2');
     if (!folder) throw new Error('Could not create ZIP folder.');
     for (const file of fetched) folder.file(file.path.replace(/^worker\//, ''), file.text);
 
     folder.file('PACKAGE VERSION.txt', [
-      'Diehl VIN Local Worker 5.16.1',
+      'Diehl VIN Local Worker 5.16.2',
       `Package source: ${PACKAGE_REF}`,
-      'Includes current DTNA change-history retention, DTNA database publishing, worker detection, and browser-start fixes.',
-      'The base initializer starts service_v7.py and requires v5.16.1.',
+      'DTNA lastChangeTime is stamped with the date/time of each successful DTNA run for every row.',
+      'changeCount and changeNotes continue to track actual data changes separately.',
+      'The base initializer starts service_v7.py and requires v5.16.2.',
       'STOP ALL DIEHL recognizes service_v7.py.',
     ].join('\r\n'));
 
     folder.file('READ ME FIRST.txt', [
-      'DIEHL VIN LOCAL WORKER v5.16.1',
+      'DIEHL VIN LOCAL WORKER v5.16.2',
       '',
-      'This build installs the current v5.16.1 local worker.',
+      'This build installs the current v5.16.2 local worker.',
       '1. Extract the entire ZIP.',
       '2. Run STOP ALL DIEHL.cmd.',
       '3. Run START DIEHL VIN.cmd.',
-      '4. Refresh the VIN Platform and click Check again. It must display worker v5.16.1.',
+      '4. Refresh the VIN Platform. It must display worker v5.16.2.',
+      '5. Run DTNA. Every written DTNA row should receive that run date/time in lastChangeTime.',
     ].join('\r\n'));
 
     const body = await zip.generateAsync({type:'arraybuffer',compression:'DEFLATE',compressionOptions:{level:6}});
     return new Response(body,{status:200,headers:{
       'Content-Type':'application/zip',
-      'Content-Disposition':'attachment; filename="Diehl_VIN_Local_Worker_v5_16_1.zip"',
+      'Content-Disposition':'attachment; filename="Diehl_VIN_Local_Worker_v5_16_2.zip"',
       'Cache-Control':'no-store, no-cache, must-revalidate, max-age=0',
       'X-Diehl-Worker-Package':PACKAGE_VERSION,
       'X-Diehl-Package-Revision':PACKAGE_REF,
