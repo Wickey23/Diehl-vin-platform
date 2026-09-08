@@ -27,7 +27,7 @@ WORKER_LOG = LOG_DIR / 'worker.log'
 DATABASE_LOG = LOG_DIR / 'database.log'
 SERVICE = ROOT / 'service_v7.py'
 DATABASE_SERVICE = ROOT / 'database_service.py'
-EXPECTED_WORKER_VERSION = '5.16.1'
+EXPECTED_WORKER_VERSION = '5.16.2'
 
 
 def venv_python() -> Path:
