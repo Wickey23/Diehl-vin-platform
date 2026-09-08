@@ -9,17 +9,17 @@ const tabs = [
   { href: '/dtna', label: 'DTNA' },
   { href: '/vin-inservice', label: 'VIN In-Service' },
   { href: '/database', label: 'Database' },
-  { href: '/history', label: 'Export Runs' },
 ];
 
-const LATEST_WORKER_VERSION = '5.16.4';
-const LATEST_WORKER_UPDATED = '09/08/2026 5:52 PM ET';
+const LATEST_WORKER_VERSION = '5.16.2';
+const LATEST_WORKER_UPDATED = '09/08/2026 2:23 PM ET';
 const RELEASE_NOTES = [
-  'DTNA Edge now runs with normal Chromium sandboxing instead of the unstable --no-sandbox launch mode.',
-  'The Edge crash-restore bubble is suppressed for the dedicated DTNA browser profile.',
-  'Dealer Reporting now retries automatically once if the first SPA load hangs on the spinner.',
-  'Each computer still writes to its own OneDrive source workbook.',
-  'Every successful DTNA run remains available from Export Runs.',
+  'DTNA lastChangeTime now means the exact date and time of the latest DTNA run/write.',
+  'Every DTNA row written by the same run receives the same run timestamp, so the column cannot remain blank after a successful sync.',
+  'changeCount and changeNotes continue to represent actual detected DTNA data changes separately from the run timestamp.',
+  'The fresh DTNA Sales Order + Dealer Reporting AUTO VIN dataset continues to write to the shared DTNA Excel sheet and refresh the website database mirror.',
+  'Start OWL Check still launches a newly submitted VIN batch immediately in its own local execution thread.',
+  'Coverage Info, Major Components, and Product Registration mappings remain unchanged.',
 ];
 
 export function TopTabs() {
@@ -62,7 +62,7 @@ export function TopTabs() {
             </div>
 
             <div style={{padding:'18px 22px 8px'}}>
-              <p style={{margin:'0 0 12px',color:'#475467',fontSize:14}}>This release fixes the Edge crash/restore state and Dealer Reporting spinner hangs seen during DTNA runs.</p>
+              <p style={{margin:'0 0 12px',color:'#475467',fontSize:14}}>This release makes DTNA lastChangeTime the timestamp of the most recent successful DTNA run/write.</p>
               <ul style={{margin:'0 0 8px',paddingLeft:22,color:'#344054',fontSize:14,lineHeight:1.55}}>
                 {RELEASE_NOTES.map((note) => <li key={note} style={{marginBottom:8}}>{note}</li>)}
               </ul>

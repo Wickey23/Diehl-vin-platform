@@ -62,10 +62,10 @@ def ensure_dirs() -> None:
 
 
 def get_working_excel() -> Path:
-    """Return this computer's configured Diehl VIN workbook."""
+    """Return the canonical shared OneDrive workbook for every employee."""
     cached = load_cached_path(ROOT / "config.json")
     workbook = find_shared_workbook(cached)
-    log(f"Using configured platform workbook: {workbook}")
+    log(f"Using shared platform workbook: {workbook}")
     return workbook.resolve()
 
 
@@ -159,21 +159,15 @@ def normalize_response(value: Any) -> list[dict[str, Any]]:
 
 
 def launch_context(playwright):
-    # Use Edge's normal sandbox. Playwright defaults Chromium sandboxing off,
-    # which adds --no-sandbox and can make the persistent DTNA Edge profile
-    # unstable. Also suppress the crash-restore bubble from prior forced exits.
     args = dict(
         user_data_dir=str(PROFILE_DIR),
         headless=False,
         viewport={"width": 1500, "height": 900},
         accept_downloads=True,
-        chromium_sandbox=True,
-        args=["--disable-session-crashed-bubble"],
     )
     try:
         return playwright.chromium.launch_persistent_context(channel="msedge", **args)
-    except PlaywrightError as exc:
-        log(f"Installed Edge launch failed; falling back to bundled Chromium: {exc}")
+    except PlaywrightError:
         return playwright.chromium.launch_persistent_context(**args)
 
 
@@ -513,54 +507,18 @@ def set_order_received_date_max_range(page) -> None:
     log('Order Received Date set to "-48 months to +12 months" using the calendar picker.')
 
 
-def _reporting_ready(page, timeout_ms: int = 12000) -> bool:
-    try:
-        page.get_by_text(re.compile(r"Order\s*Received\s*Date", re.I), exact=False).first.wait_for(
-            state="visible", timeout=timeout_ms
-        )
-        return True
-    except Exception:
-        return False
-
-
-def open_reporting_page(page) -> None:
-    """Open Dealer Reporting with one automatic clean retry if the SPA hangs."""
-    last_error = None
-    for attempt in range(1, 3):
-        try:
-            log(f"Opening Dealer Reporting (attempt {attempt}/2)...")
-            page.goto(REPORT_URL, wait_until="domcontentloaded", timeout=60_000)
-            auto_click_login_if_available(page)
-            if _reporting_ready(page, 15_000):
-                log("Dealer Reporting loaded and Order Received Date is visible.")
-                return
-            last_error = RuntimeError("Order Received Date did not appear after Dealer Reporting navigation.")
-        except Exception as exc:
-            last_error = exc
-
-        if attempt == 1:
-            log(f"Dealer Reporting first load did not complete: {last_error}. Retrying cleanly...")
-            try:
-                page.goto("about:blank", wait_until="domcontentloaded", timeout=10_000)
-            except Exception:
-                pass
-            page.wait_for_timeout(700)
-
-    raise RuntimeError(
-        "Dealer Reporting did not finish loading after two attempts. "
-        f"Last error: {last_error}"
-    )
-
-
 def download_auto_vin_report(page) -> Path:
+    page.goto(REPORT_URL, wait_until="domcontentloaded", timeout=120_000)
+    auto_click_login_if_available(page)
+    page.wait_for_timeout(2500)
+
     try:
-        open_reporting_page(page)
-    except Exception as exc:
+        page.get_by_text(re.compile(r"Order\s*Received\s*Date", re.I), exact=False).first.wait_for(timeout=10000)
+    except Exception:
         print()
-        print("Dealer Reporting did not load normally.")
-        print(f"Details: {exc}")
-        print("You can finish login/MFA or refresh Dealer Reporting manually in the open Edge window.")
-        input("When Order Received Date is visible, return here and press ENTER to continue... ")
+        print("Dealer Reporting still needs manual attention.")
+        print("Complete login/MFA and wait until the reporting page is fully visible.")
+        input("Then return here and press ENTER to continue... ")
 
     set_order_received_date_max_range(page)
 
@@ -661,39 +619,20 @@ def enrich(records: list[dict[str, Any]], mapping: dict[str, dict[str, str]]) ->
         serial = norm_serial(row.get("serialNo"))
         lead = norm_serial(row.get("leadSerialNo"))
 
-        keys = []
-        for candidate in (serial, lead):
-            if candidate:
-                keys.append(candidate)
-                if len(candidate) >= 8:
-                    keys.append(candidate[-8:])
-                if len(candidate) >= 7:
-                    keys.append(candidate[-7:])
+        candidates: list[str] = []
+        for value in (serial, lead):
+            if value:
+                candidates.append(value)
+                if len(value) >= 8:
+                    candidates.append(value[-8:])
+                if len(value) >= 7:
+                    candidates.append(value[-7:])
 
-        found = None
-        method = ""
-        for key in keys:
-            if key in mapping:
-                found = mapping[key]
-                method = "Serial Number"
-                break
-
-        if found:
-            row["VIN"] = found.get("VIN", "")
-            row["inServiceDate"] = found.get("inServiceDate", "")
-            row["vinSource"] = "Dealer Reporting AUTO VIN"
-            row["vinMatchMethod"] = method
-        else:
-            row.setdefault("VIN", "")
-            row.setdefault("inServiceDate", "")
-            row["vinSource"] = ""
-            row["vinMatchMethod"] = ""
-
-
-def clean_for_compare(value: Any) -> str:
-    raw = clean(value)
-    raw = re.sub(r"^CURRENT:\s*", "", raw, flags=re.I)
-    return re.sub(r"\s+", " ", raw).strip()
+        match = next((mapping[k] for k in candidates if k in mapping), None)
+        row["VIN"] = match.get("VIN", "") if match else ""
+        row["inServiceDate"] = match.get("inServiceDate", "") if match else ""
+        row["vinSource"] = "Dealer Reporting" if row["VIN"] else ""
+        row["vinMatchMethod"] = "Serial Number" if match else ""
 
 
 def row_key(row: dict[str, Any]) -> str:
@@ -707,42 +646,39 @@ def row_key(row: dict[str, Any]) -> str:
 
 
 def previous_snapshot() -> list[dict[str, Any]]:
-    path = HISTORY_DIR / "latest_snapshot.json"
-    if not path.exists():
+    p = HISTORY_DIR / "latest_snapshot.json"
+    if not p.exists():
         return []
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-        return value if isinstance(value, list) else []
-    except Exception:
-        return []
+    return normalize_response(json.loads(p.read_text(encoding="utf-8")))
 
 
-def compare(old_rows: list[dict[str, Any]], new_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def compare(old_rows, new_rows):
     old = {row_key(r): r for r in old_rows}
     new = {row_key(r): r for r in new_rows}
     when = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    changes: list[dict[str, Any]] = []
+    changes = []
 
     for key, row in new.items():
-        prior = old.get(key)
-        if prior is None:
-            changes.append({
-                "changeTime": when, "changeType": "NEW ORDER",
-                "serialNo": clean(row.get("serialNo")), "VIN": clean(row.get("VIN")),
-                "customer": clean(row.get("customer")), "baseMdl": clean(row.get("baseMdl")),
-                "field": "", "oldValue": "", "newValue": ""
-            })
+        before = old.get(key)
+        if before is None:
+            if old:
+                changes.append({
+                    "changeTime": when, "changeType": "NEW ORDER",
+                    "serialNo": clean(row.get("serialNo")), "VIN": clean(row.get("VIN")),
+                    "customer": clean(row.get("customer")), "baseMdl": clean(row.get("baseMdl")),
+                    "field": "", "oldValue": "", "newValue": "Order added",
+                })
             continue
 
         for field in TRACK_FIELDS:
-            before = clean_for_compare(prior.get(field))
-            after = clean_for_compare(row.get(field))
-            if before != after:
+            a = clean(before.get(field))
+            b = clean(row.get(field))
+            if a != b:
                 changes.append({
                     "changeTime": when, "changeType": "FIELD CHANGED",
                     "serialNo": clean(row.get("serialNo")), "VIN": clean(row.get("VIN")),
                     "customer": clean(row.get("customer")), "baseMdl": clean(row.get("baseMdl")),
-                    "field": field, "oldValue": before, "newValue": after
+                    "field": field, "oldValue": a, "newValue": b,
                 })
 
     for key, row in old.items():
@@ -751,13 +687,113 @@ def compare(old_rows: list[dict[str, Any]], new_rows: list[dict[str, Any]]) -> l
                 "changeTime": when, "changeType": "ORDER REMOVED",
                 "serialNo": clean(row.get("serialNo")), "VIN": clean(row.get("VIN")),
                 "customer": clean(row.get("customer")), "baseMdl": clean(row.get("baseMdl")),
-                "field": "", "oldValue": "", "newValue": ""
+                "field": "", "oldValue": "Order existed", "newValue": "",
             })
 
     return changes
 
 
-def add_change_notes_to_current_rows(records: list[dict[str, Any]], changes: list[dict[str, Any]]) -> None:
+DATE_FIELDS = {
+    "statusDate": "Status Date",
+    "chassisStartDate": "Scheduled Chassis Start",
+    "destRecvDate": "Destination Receive Date",
+    "origProjDelvDate": "Original Projected Delivery",
+    "projDelvDate": "Projected Delivery",
+    "dispatchDate": "Dispatch Date",
+    "deliveredDate": "Delivered Date",
+}
+
+
+def preserve_date_history(
+    old_rows: list[dict[str, Any]],
+    new_rows: list[dict[str, Any]],
+    changes: list[dict[str, Any]],
+) -> None:
+    old_by_key = {row_key(r): r for r in old_rows}
+    changes_by_serial: dict[str, list[dict[str, Any]]] = {}
+
+    for change in changes:
+        serial = norm_serial(change.get("serialNo"))
+        field = clean(change.get("field"))
+        if serial and field in DATE_FIELDS:
+            changes_by_serial.setdefault(serial, []).append(change)
+
+    for row in new_rows:
+        serial = norm_serial(row.get("serialNo"))
+        prior = old_by_key.get(row_key(row), {})
+        prior_history_raw = prior.get("_dateHistory", {})
+        prior_history = prior_history_raw if isinstance(prior_history_raw, dict) else {}
+        updated_history: dict[str, list[str]] = {}
+
+        for field, label in DATE_FIELDS.items():
+            current_value = clean(row.get(field))
+            history_values = []
+            existing = prior_history.get(field, [])
+            if isinstance(existing, list):
+                history_values.extend(clean(v) for v in existing if clean(v))
+
+            prior_visible = clean(prior.get(field))
+            if prior_visible:
+                for line in prior_visible.splitlines():
+                    line = line.strip()
+                    if line.upper().startswith("CURRENT:"):
+                        value = line.split(":", 1)[1].strip()
+                        if value:
+                            history_values.append(value)
+                    elif line.upper().startswith("PREVIOUS:"):
+                        value = line.split(":", 1)[1].strip()
+                        if value:
+                            history_values.append(value)
+                    elif "\n" not in prior_visible:
+                        history_values.append(prior_visible)
+
+            for change in changes_by_serial.get(serial, []):
+                if clean(change.get("field")) == field:
+                    old_value = clean(change.get("oldValue"))
+                    if old_value:
+                        for line in old_value.splitlines():
+                            line = line.strip()
+                            if line.upper().startswith("CURRENT:"):
+                                value = line.split(":", 1)[1].strip()
+                                if value:
+                                    history_values.append(value)
+                            elif line.upper().startswith("PREVIOUS:"):
+                                value = line.split(":", 1)[1].strip()
+                                if value:
+                                    history_values.append(value)
+                            else:
+                                history_values.append(line)
+
+            cleaned_history = []
+            seen = set()
+            for value in history_values:
+                value = clean(value)
+                if not value or value == current_value or value in seen:
+                    continue
+                seen.add(value)
+                cleaned_history.append(value)
+
+            updated_history[field] = cleaned_history
+
+            if current_value:
+                lines = [f"CURRENT: {current_value}"]
+                lines.extend(f"PREVIOUS: {value}" for value in cleaned_history)
+                row[field] = "\n".join(lines)
+            elif cleaned_history:
+                row[field] = "\n".join(
+                    [f"CURRENT: [blank]"] +
+                    [f"PREVIOUS: {value}" for value in cleaned_history]
+                )
+            else:
+                row[field] = ""
+
+        row["_dateHistory"] = updated_history
+
+
+def add_change_notes_to_current_rows(
+    records: list[dict[str, Any]],
+    changes: list[dict[str, Any]]
+) -> None:
     by_serial: dict[str, list[str]] = {}
     change_times: dict[str, str] = {}
 
@@ -770,6 +806,7 @@ def add_change_notes_to_current_rows(records: list[dict[str, Any]], changes: lis
         field = clean(change.get("field"))
         old_value = clean(change.get("oldValue"))
         new_value = clean(change.get("newValue"))
+        when = clean(change.get("changeTime"))
 
         if change_type == "FIELD CHANGED":
             note = f"{field}: {old_value or '[blank]'} -> {new_value or '[blank]'}"
@@ -781,7 +818,8 @@ def add_change_notes_to_current_rows(records: list[dict[str, Any]], changes: lis
             note = change_type or "Changed"
 
         by_serial.setdefault(serial, []).append(note)
-        change_times[serial] = clean(change.get("changeTime"))
+        if when:
+            change_times[serial] = when
 
     for row in records:
         serial = norm_serial(row.get("serialNo"))
@@ -791,88 +829,73 @@ def add_change_notes_to_current_rows(records: list[dict[str, Any]], changes: lis
         row["lastChangeTime"] = change_times.get(serial, "")
 
 
-def preserve_date_history(old_rows: list[dict[str, Any]], new_rows: list[dict[str, Any]]) -> None:
-    old = {row_key(r): r for r in old_rows}
-    date_fields = {
-        "statusDate": "Status Date",
-        "chassisStartDate": "Scheduled Chassis Start",
-        "destRecvDate": "Destination Receive Date",
-        "origProjDelvDate": "Original Projected Delivery",
-        "projDelvDate": "Projected Delivery",
-        "dispatchDate": "Dispatch Date",
-        "deliveredDate": "Delivered Date",
-    }
-
-    for row in new_rows:
-        prior = old.get(row_key(row))
-        if not prior:
-            continue
-
-        history = dict(prior.get("_dateHistory") or {})
-        for field, label in date_fields.items():
-            previous = clean_for_compare(prior.get(field))
-            current = clean_for_compare(row.get(field))
-            if previous and current and previous != current:
-                values = history.get(field, [])
-                if not isinstance(values, list):
-                    values = [clean(values)] if clean(values) else []
-                if previous not in values:
-                    values.append(previous)
-                history[field] = values
-
-                prior_text = " | ".join(values)
-                row[field] = f"CURRENT: {current}\nPRIOR: {prior_text}"
-
-        if history:
-            row["_dateHistory"] = history
-
-
-def load_open_excel_workbook(excel, destination: Path):
-    target = os.path.normcase(os.path.abspath(str(destination)))
-    for i in range(1, excel.Workbooks.Count + 1):
-        candidate = excel.Workbooks.Item(i)
-        try:
-            full_name = os.path.normcase(os.path.abspath(str(candidate.FullName)))
-        except Exception:
-            continue
-        if full_name == target:
-            return candidate
-    return None
-
-
 def write_dataframe_into_same_excel(df: pd.DataFrame, destination: Path) -> None:
-    """Update the selected workbook and its existing DTNA sheet in place."""
+    """
+    Update only the shared DTNA worksheet in the selected workbook.
+
+    Reliable behavior:
+    - Attach to the exact workbook if it is already open.
+    - Otherwise open that exact workbook in a new hidden Excel instance.
+    - Never continue with workbook=None.
+    - Never create a different workbook.
+    - Preserve all other sheets, queries, connections, and workbook settings.
+    """
     try:
-        import pythoncom
-        import win32com.client
-    except Exception as exc:
+        import pythoncom  # type: ignore
+        import win32com.client  # type: ignore
+    except ImportError as exc:
         raise RuntimeError(
-            "pywin32 is required to update the exact selected Excel workbook. "
-            f"Details: {exc}"
+            "pywin32 is required. Run SETUP_AND_RUN.bat once."
         ) from exc
 
     pythoncom.CoInitialize()
+
+    destination = destination.resolve()
+    if not destination.exists():
+        raise RuntimeError(
+            f"The selected workbook no longer exists: {destination}\n"
+            "The shared OneDrive workbook could not be found."
+        )
+
+    destination_text = str(destination)
+    destination_lower = destination_text.lower()
+
     excel = None
     workbook = None
     opened_by_script = False
     created_excel_instance = False
 
     try:
-        destination = destination.resolve()
-        destination_text = str(destination)
-
         try:
-            excel = win32com.client.GetActiveObject("Excel.Application")
-            workbook = load_open_excel_workbook(excel, destination)
+            workbook = win32com.client.GetObject(destination_text)
+            if workbook is not None:
+                excel = workbook.Application
+                log(f"Attached directly to open workbook: {destination}")
         except Exception:
-            excel = None
+            workbook = None
 
         if workbook is None:
-            if excel is None:
-                excel = win32com.client.DispatchEx("Excel.Application")
-                excel.Visible = False
-                excel.DisplayAlerts = False
-                created_excel_instance = True
+            try:
+                active_excel = win32com.client.GetActiveObject("Excel.Application")
+                for i in range(1, active_excel.Workbooks.Count + 1):
+                    candidate = active_excel.Workbooks.Item(i)
+                    try:
+                        full_name = str(candidate.FullName).lower()
+                        if full_name == destination_lower:
+                            workbook = candidate
+                            excel = active_excel
+                            log(f"Found selected workbook in active Excel: {destination}")
+                            break
+                    except Exception:
+                        continue
+            except Exception:
+                pass
+
+        if workbook is None:
+            excel = win32com.client.DispatchEx("Excel.Application")
+            created_excel_instance = True
+            excel.Visible = False
+            excel.DisplayAlerts = False
 
             workbook = excel.Workbooks.Open(
                 destination_text,
@@ -1139,7 +1162,7 @@ def main() -> int:
     ensure_dirs()
     migrate_package_data_once()
     working_excel = get_working_excel()
-    log(f"Starting interactive DTNA sync. Workbook: {working_excel}")
+    log(f"Starting interactive DTNA sync. Shared workbook: {working_excel}")
 
     with sync_playwright() as p:
         context = launch_context(p)
@@ -1156,36 +1179,54 @@ def main() -> int:
                 return 0
 
             try:
-                raw = fetch_sales_orders_from_logged_in_page(page)
+                result = fetch_sales_orders_from_logged_in_page(page)
             except Exception:
                 print()
-                print("DTNA Sales Order is not authenticated yet.")
-                print("Complete login / MFA in Edge, then return here.")
-                input("After Sales Order is fully loaded, press ENTER to continue... ")
-                raw = fetch_sales_orders_from_logged_in_page(page)
+                print("DTNA still needs manual attention.")
+                print("Complete login/MFA and wait until the Sales Order table is visible.")
+                input("Then return here and press ENTER to continue... ")
+                result = fetch_sales_orders_from_logged_in_page(page)
+            records = normalize_response(result)
+            log(f"Downloaded {len(records):,} Sales Order rows.")
 
-            records = normalize_response(raw)
-            log(f"Downloaded {len(records)} Sales Order rows.")
-
-            old_rows = previous_snapshot()
             report_path = download_auto_vin_report(page)
-            report_map = build_report_map(report_path)
-            enrich(records, report_map)
-            preserve_date_history(old_rows, records)
-            changes = compare(old_rows, records)
-            save_all(records, changes, working_excel)
-
-            print()
-            print("DTNA sync complete.")
-            print(f"Workbook: {working_excel}")
-            print(f"Current rows: {len(records)}")
-            print(f"Changes this run: {len(changes)}")
-            print(f"History: {CHANGES_DIR / 'dtna_change_log.xlsx'}")
-            return 0
+            mapping = build_report_map(report_path)
+            enrich(records, mapping)
 
         finally:
             context.close()
 
+    old_rows = previous_snapshot()
+    changes = compare(old_rows, records)
+    preserve_date_history(old_rows, records, changes)
+    save_all(records, changes, working_excel)
+
+    print()
+    print("SUCCESS")
+    print(f"Orders downloaded: {len(records):,}")
+    print(f"Changes detected: {len(changes):,}")
+    print(f"Shared Excel database updated: {working_excel} -> DTNA")
+    (ROOT / "WORKING_FILE_LOCATION.txt").write_text(str(working_excel), encoding="utf-8")
+    print(f"Changes: {CHANGES_DIR / 'latest_changes.xlsx'}")
+    print()
+    input("Press ENTER to close...")
+    return 0
+
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except Exception as exc:
+        ensure_dirs()
+        log(f"ERROR: {exc}")
+        (DATA_ROOT / "SYNC_STATUS.txt").write_text(
+            "status: FAILED\n"
+            f"lastRun: {datetime.now():%Y-%m-%d %H:%M:%S}\n"
+            f"message: {exc}\n"
+            f"loginProfile: {PROFILE_DIR}\n",
+            encoding="utf-8",
+        )
+        print()
+        print("ERROR:", exc)
+        input("Press ENTER to close...")
+        raise

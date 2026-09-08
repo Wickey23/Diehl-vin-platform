@@ -12,17 +12,18 @@ set "PY312=%LocalAppData%\Programs\Python\Python312\python.exe"
 title Diehl VIN - Setup and Start
 color 0F
 echo ============================================================
-echo  DIEHL VIN - SETUP AND START v5.16.4
+echo  DIEHL VIN - SETUP AND START v5.16.2
 echo ============================================================
 echo.
 echo Permanent runtime:
 echo %INSTALLDIR%
 echo.
-echo Each PC uses its own OneDrive source workbook.
-echo DTNA and VIN In-Service write only to that computer source workbook.
-echo Every successful DTNA run is archived and downloadable from Export Runs.
-echo DTNA Edge now uses normal Chromium sandboxing and retries Dealer Reporting if the first load hangs.
+echo VIN In-Service: immediate OWL execution + exact Coverage + Major Components + Product Registration
+echo Coverage uses Product S/N. Major Components uses Chassis S/N.
+echo Start OWL Check now launches the submitted batch immediately instead of waiting on the old scheduler.
 echo Website: opens the Diehl VIN Platform after the local services are confirmed ready.
+echo DTNA Sales Order/AUTO VIN remains a separate workflow.
+echo DTNA lastChangeTime is stamped with the date/time of each DTNA run.
 echo.
 
 echo [1/5] Installing packaged Diehl program files...
@@ -46,8 +47,6 @@ if errorlevel 1 goto :fail_package
 call :copy_file "excel_bridge.py"
 if errorlevel 1 goto :fail_package
 call :copy_file "shared_workbook.py"
-if errorlevel 1 goto :fail_package
-call :copy_file "run_exports.py"
 if errorlevel 1 goto :fail_package
 call :copy_file "workbook_organizer.py"
 if errorlevel 1 goto :fail_package
@@ -103,7 +102,7 @@ echo       Python ready: %PYEXE%
 echo.
 
 echo [3/5] Verifying local environment...
-echo [4/5] Preparing this computer OneDrive source workbook and starting worker services...
+echo [4/5] Finding shared OneDrive workbook and starting worker services...
 echo.
 cd /d "%INSTALLDIR%"
 "%PYEXE%" DiehlInitializer_v514.py
@@ -112,11 +111,12 @@ if not "%RC%"=="0" goto :fail_initializer
 
 echo.
 echo [5/5] SUCCESS
-echo       Diehl VIN v5.16.4 and Database viewer are running.
-echo       This PC writes to its own OneDrive source workbook.
+echo       Diehl VIN v5.16.2 and Database viewer are running.
+echo       Start OWL Check launches the new VIN batch immediately; no scheduler wait.
 echo       DTNA writes the current run date/time into lastChangeTime for every row.
-echo       Successful DTNA runs are archived for download from the Export Runs page.
-echo       Dealer Reporting now retries automatically if its first page load hangs.
+echo       Coverage: Product S/N -> verify VIN -> Tab -> wait for actual populated fields.
+echo       Major Components: Chassis S/N -> verify VIN -> Tab -> wait for chassis/component table.
+echo       Product Registration: customer identity/account/address/contact fields.
 echo       The Diehl VIN Platform opens after startup and connects to this local worker.
 echo.
 timeout /t 2 /nobreak >nul

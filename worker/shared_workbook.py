@@ -1,27 +1,10 @@
 from __future__ import annotations
 
-import getpass
 import json
 import os
-import re
-import socket
 from pathlib import Path
 
-SOURCE_FOLDER_NAME = 'Diehl VIN Platform Sources'
-
-
-def _safe_piece(value: str) -> str:
-    value = re.sub(r'[^A-Za-z0-9._-]+', '_', str(value or '').strip())
-    return value.strip('._-') or 'UNKNOWN'
-
-
-def source_workbook_name() -> str:
-    computer = _safe_piece(os.environ.get('COMPUTERNAME') or socket.gethostname())
-    user = _safe_piece(getpass.getuser())
-    return f'DIEHL-VIN-SOURCE_{computer}_{user}.xlsx'
-
-
-WORKBOOK_NAME = source_workbook_name()
+WORKBOOK_NAME = 'DIEHL-VIN-PLATFORM WORKBOOK.xlsx'
 
 
 def _unique_paths(values):
@@ -56,89 +39,83 @@ def onedrive_roots() -> list[Path]:
     return [p for p in _unique_paths(candidates) if p.exists() and p.is_dir()]
 
 
-def preferred_onedrive_root() -> Path:
-    roots = onedrive_roots()
-    if not roots:
-        raise RuntimeError(
-            'No synced OneDrive folder was detected on this PC. Start/sign in to OneDrive, '
-            'then run START DIEHL VIN again.'
-        )
-
-    commercial = os.environ.get('OneDriveCommercial')
-    if commercial:
-        p = Path(os.path.expandvars(commercial)).expanduser()
-        if p.exists() and p.is_dir():
-            return p
-
-    for root in roots:
-        text = str(root).casefold()
-        if 'diehl' in text or 'truck world' in text:
-            return root
-    return roots[0]
+def is_target(path: Path | str | None) -> bool:
+    if not path:
+        return False
+    try:
+        p = Path(path)
+        return p.name.casefold() == WORKBOOK_NAME.casefold() and p.exists() and p.is_file()
+    except Exception:
+        return False
 
 
-def source_folder() -> Path:
-    folder = preferred_onedrive_root() / SOURCE_FOLDER_NAME
-    folder.mkdir(parents=True, exist_ok=True)
-    return folder
+def _is_inside(path: Path, root: Path) -> bool:
+    try:
+        path_abs = Path(os.path.abspath(str(path)))
+        root_abs = Path(os.path.abspath(str(root)))
+        return os.path.commonpath([str(path_abs), str(root_abs)]) == str(root_abs)
+    except Exception:
+        return False
 
 
-def expected_source_workbook() -> Path:
-    return source_folder() / WORKBOOK_NAME
-
-
-def _create_source_workbook(path: Path) -> None:
-    from openpyxl import Workbook
-
-    path.parent.mkdir(parents=True, exist_ok=True)
-    wb = Workbook()
-    dtna = wb.active
-    dtna.title = 'DTNA'
-    dtna.append([
-        'VIN', 'inServiceDate', 'serialNo', 'leadSerialNo', 'changeCount',
-        'changeNotes', 'lastChangeTime'
-    ])
-
-    vin = wb.create_sheet('VIN In-Service')
-    vin.append([
-        'VIN', 'Verification Status', 'In-Service Status', 'In-Service Date',
-        'Mileage', 'Customer Result', 'Customer Name', 'Registered Customer Name',
-        'Registered Customer Account', 'Ordered Customer Name', 'Last Updated', 'Updated By'
-    ])
-
-    info = wb.create_sheet('Source Info')
-    info.append(['Field', 'Value'])
-    info.append(['Computer', os.environ.get('COMPUTERNAME') or socket.gethostname()])
-    info.append(['Windows User', getpass.getuser()])
-    info.append(['Source Workbook', path.name])
-    info.append(['Source Folder', str(path.parent)])
-    info.append(['Purpose', 'Per-computer Diehl VIN source workbook'])
-
-    wb.save(path)
+def is_onedrive_target(path: Path | str | None, roots: list[Path] | None = None) -> bool:
+    if not is_target(path):
+        return False
+    p = Path(path)
+    roots = roots if roots is not None else onedrive_roots()
+    return any(_is_inside(p, root) for root in roots)
 
 
 def find_shared_workbook(cached_path: str | Path | None = None) -> Path:
-    """Return this computer's own OneDrive source workbook.
+    roots = onedrive_roots()
 
-    The legacy function name is retained so existing DTNA/VIN code does not need
-    to change. Each PC writes only to its own workbook. A separate master workbook
-    may pull every DIEHL-VIN-SOURCE_*.xlsx file from SOURCE_FOLDER_NAME.
-    """
-    expected = expected_source_workbook()
-    expected_norm = os.path.normcase(os.path.abspath(str(expected)))
+    # Reuse a cached path ONLY when it is still the exact workbook and is inside
+    # one of the detected OneDrive roots. This prevents an old local copy from
+    # silently becoming the DTNA write target.
+    if is_onedrive_target(cached_path, roots):
+        return Path(cached_path)
 
-    if cached_path:
-        try:
-            cached = Path(os.path.expandvars(str(cached_path))).expanduser()
-            cached_norm = os.path.normcase(os.path.abspath(str(cached)))
-            if cached_norm == expected_norm and cached.exists() and cached.is_file():
-                return cached
-        except Exception:
-            pass
+    matches: list[Path] = []
 
-    if not expected.exists():
-        _create_source_workbook(expected)
-    return expected
+    # Check the OneDrive roots themselves first, then exact-name recursive matches.
+    for root in roots:
+        direct = root / WORKBOOK_NAME
+        if direct.exists() and direct.is_file():
+            matches.append(direct)
+
+    if not matches:
+        for root in roots:
+            try:
+                for match in root.rglob(WORKBOOK_NAME):
+                    if match.is_file():
+                        matches.append(match)
+            except (OSError, PermissionError):
+                continue
+
+    # Deduplicate aliases/case variants.
+    deduped = _unique_paths(matches)
+    if len(deduped) == 1:
+        return deduped[0]
+    if len(deduped) > 1:
+        paths = '\n'.join(f' - {p}' for p in deduped[:10])
+        raise RuntimeError(
+            f'Multiple copies of {WORKBOOK_NAME} were found in OneDrive. '
+            'Keep only the company shared/synced copy on this PC so Diehl VIN cannot write to the wrong workbook.\n' + paths
+        )
+
+    roots_text = '\n'.join(f' - {p}' for p in roots) if roots else ' - No OneDrive sync root was detected.'
+    cached_text = str(cached_path or '').strip()
+    cached_note = ''
+    if cached_text and is_target(cached_text):
+        cached_note = (
+            f'\n\nIgnored cached workbook because it is not inside a detected OneDrive root:\n - {cached_text}'
+        )
+
+    raise RuntimeError(
+        f'{WORKBOOK_NAME} was not found in this PC\'s synced OneDrive folders.\n\n'
+        'Open OneDrive/SharePoint and sync the Diehl shared folder that contains the workbook, then press START DIEHL VIN again.\n\n'
+        f'Searched:\n{roots_text}{cached_note}'
+    )
 
 
 def load_cached_path(config_path: Path) -> str:

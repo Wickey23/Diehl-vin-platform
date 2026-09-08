@@ -10,7 +10,6 @@ import pandas as pd
 
 import dtna_login_and_sync as base
 from database_cache import write_table
-from run_exports import save_dtna_run
 
 
 # Keep the proven DTNA browser/data flow in dtna_login_and_sync.py.
@@ -176,6 +175,8 @@ def _find_open_workbook(pythoncom, win32com, destination: Path):
     except Exception:
         pass
 
+    # Walk the Running Object Table because multiple independent Excel instances
+    # can exist and GetActiveObject may point to the wrong one.
     try:
         rot = pythoncom.GetRunningObjectTable()
         enum = rot.EnumRunning()
@@ -218,6 +219,9 @@ def _find_open_workbook(pythoncom, win32com, destination: Path):
     if exact:
         return exact[0]
 
+    # OneDrive/SharePoint often reports an HTTPS FullName even though the worker
+    # knows the synced local path. If exactly one open workbook has the expected
+    # file name, that is the workbook the employee is actually using.
     unique = []
     keys = set()
     for wb in same_name:
@@ -257,7 +261,7 @@ def _mirror_dataframe(df: pd.DataFrame, destination: Path) -> None:
 
 
 def write_dataframe_into_onedrive_excel(df: pd.DataFrame, destination: Path) -> None:
-    """Write DTNA into this PC's configured source workbook and archive the run."""
+    """Write DTNA into the exact shared OneDrive workbook the employee has open."""
     import pythoncom  # type: ignore
     import win32com.client  # type: ignore
 
@@ -267,7 +271,7 @@ def write_dataframe_into_onedrive_excel(df: pd.DataFrame, destination: Path) -> 
 
     destination = destination.resolve()
     if not destination.exists():
-        raise RuntimeError(f'Configured source workbook no longer exists: {destination}')
+        raise RuntimeError(f'Shared OneDrive workbook no longer exists: {destination}')
 
     last_error = None
     for attempt in range(1, 7):
@@ -278,8 +282,9 @@ def write_dataframe_into_onedrive_excel(df: pd.DataFrame, destination: Path) -> 
             workbook = _find_open_workbook(pythoncom, win32com, destination)
             if workbook is not None:
                 excel = workbook.Application
-                base.log(f'Attached to OPEN source workbook: {workbook.FullName}')
+                base.log(f'Attached to OPEN OneDrive workbook: {workbook.FullName}')
             else:
+                # No open copy matched. Open the exact synced OneDrive path.
                 excel = win32com.client.DispatchEx('Excel.Application')
                 created_excel = True
                 excel.Visible = False
@@ -289,12 +294,12 @@ def write_dataframe_into_onedrive_excel(df: pd.DataFrame, destination: Path) -> 
                     IgnoreReadOnlyRecommended=True, AddToMru=False,
                 )
                 opened_here = True
-                base.log(f'Opened source workbook for DTNA write: {destination}')
+                base.log(f'Opened exact synced OneDrive workbook for DTNA write: {destination}')
 
             if workbook is None:
-                raise RuntimeError('Excel did not return the source workbook object.')
+                raise RuntimeError('Excel did not return the shared OneDrive workbook object.')
             if bool(getattr(workbook, 'ReadOnly', False)):
-                raise RuntimeError('The source workbook is read-only in Excel.')
+                raise RuntimeError('The shared OneDrive workbook is read-only in Excel.')
 
             excel.DisplayAlerts = False
             excel.ScreenUpdating = False
@@ -393,16 +398,14 @@ def write_dataframe_into_onedrive_excel(df: pd.DataFrame, destination: Path) -> 
                     sheet.Columns(col).ColumnWidth = width
 
             workbook.Save()
-            export_path = save_dtna_run(fixed, destination, run_time)
-            base.log(f'UPDATED SOURCE WORKBOOK: {workbook.FullName} -> DTNA')
+            base.log(f'UPDATED EXACT ONEDRIVE WORKBOOK: {workbook.FullName} -> DTNA')
             base.log(f'DTNA lastChangeTime written as {run_time} for {len(rows)} rows.')
-            base.log(f'Archived DTNA run export: {export_path}')
             _mirror_dataframe(fixed, destination)
             return
 
         except Exception as exc:
             last_error = exc
-            base.log(f'Source workbook write attempt {attempt}/6 failed: {exc}')
+            base.log(f'OneDrive Excel write attempt {attempt}/6 failed: {exc}')
             if attempt < 6:
                 time.sleep(2)
         finally:
@@ -429,7 +432,7 @@ def write_dataframe_into_onedrive_excel(df: pd.DataFrame, destination: Path) -> 
             pythoncom.CoUninitialize()
 
     raise RuntimeError(
-        'DTNA could not update this computer source workbook after 6 attempts. '
+        'DTNA could not update the shared OneDrive workbook after 6 attempts. '
         f'Target: {destination}\nDetails: {last_error}'
     )
 

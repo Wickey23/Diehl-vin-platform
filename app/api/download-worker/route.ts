@@ -4,8 +4,9 @@ export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 export const revalidate = 0;
 
+// v5.16.2 canonical package: standard DTNA runtime, no wrapper swapping.
 const REPO = 'Wickey23/Diehl-vin-platform';
-const PACKAGE_VERSION = '5.16.4';
+const PACKAGE_VERSION = '5.16.2';
 const PACKAGE_REF = 'main';
 const FILES = [
   'worker/START DIEHL VIN.cmd',
@@ -19,7 +20,6 @@ const FILES = [
   'worker/database_cache.py',
   'worker/excel_bridge.py',
   'worker/shared_workbook.py',
-  'worker/run_exports.py',
   'worker/workbook_organizer.py',
   'worker/vin_lookup.py',
   'worker/owl_lookup.py',
@@ -52,56 +52,45 @@ export async function GET() {
     const baseInitializer = get('DiehlInitializer.py');
     const wrapperInitializer = get('DiehlInitializer_v514.py');
     const service = get('service_v7.py');
-    const dtnaBase = get('dtna_login_and_sync.py');
     const dtnaRuntime = get('dtna_runtime.py');
-    const sharedWorkbook = get('shared_workbook.py');
-    const runExports = get('run_exports.py');
 
-    if (!launcher.includes('SETUP AND START v5.16.4')) throw new Error('Launcher is not v5.16.4.');
-    if (!launcher.includes('run_exports.py')) throw new Error('Launcher does not install run_exports.py.');
+    if (!launcher.includes('SETUP AND START v5.16.2')) throw new Error('Launcher is not v5.16.2.');
     if (!stopper.includes('service_v7\\.py')) throw new Error('STOP ALL does not recognize service_v7.py.');
     if (!baseInitializer.includes("SERVICE = ROOT / 'service_v7.py'")) throw new Error('Base initializer is not routed to service_v7.py.');
-    if (!baseInitializer.includes("EXPECTED_WORKER_VERSION = '5.16.4'")) throw new Error('Base initializer is not locked to v5.16.4.');
-    if (!baseInitializer.includes("'workbookMode': 'per-computer-onedrive-source'")) throw new Error('Per-computer workbook mode is missing.');
-    if (!wrapperInitializer.includes("EXPECTED_WORKER_VERSION = '5.16.4'")) throw new Error('Wrapper initializer is not v5.16.4.');
-    if (!service.includes("service.base.VERSION = '5.16.4'")) throw new Error('Service is not v5.16.4.');
-    if (!dtnaBase.includes('chromium_sandbox=True')) throw new Error('DTNA Edge sandbox stability fix is missing.');
-    if (!dtnaBase.includes('open_reporting_page')) throw new Error('Dealer Reporting retry logic is missing.');
-    if (!dtnaRuntime.includes('save_dtna_run')) throw new Error('DTNA run archive hook is missing.');
-    if (!sharedWorkbook.includes('DIEHL-VIN-SOURCE_')) throw new Error('Per-computer source workbook naming is missing.');
-    if (!runExports.includes('DTNA_RUN_')) throw new Error('Run export module is incomplete.');
+    if (!baseInitializer.includes("EXPECTED_WORKER_VERSION = '5.16.2'")) throw new Error('Base initializer is not locked to v5.16.2.');
+    if (!wrapperInitializer.includes("EXPECTED_WORKER_VERSION = '5.16.2'")) throw new Error('Wrapper initializer is not v5.16.2.');
+    if (!service.includes("service.base.VERSION = '5.16.2'")) throw new Error('Service is not v5.16.2.');
+    if (!dtnaRuntime.includes("row['lastChangeTime'] = run_time")) throw new Error('DTNA run-time stamping fix is missing.');
 
     const zip = new JSZip();
-    const folder = zip.folder('Diehl_VIN_Local_Worker_v5_16_4');
+    const folder = zip.folder('Diehl_VIN_Local_Worker_v5_16_2');
     if (!folder) throw new Error('Could not create ZIP folder.');
     for (const file of fetched) folder.file(file.path.replace(/^worker\//, ''), file.text);
 
     folder.file('PACKAGE VERSION.txt', [
-      'Diehl VIN Local Worker 5.16.4',
+      'Diehl VIN Local Worker 5.16.2',
       `Package source: ${PACKAGE_REF}`,
-      'Each PC creates and writes to its own OneDrive source workbook.',
-      'Every successful DTNA run is archived as a downloadable Excel file.',
-      'DTNA Edge now launches with normal Chromium sandboxing instead of --no-sandbox.',
-      'Dealer Reporting automatically retries once if the first SPA load hangs.',
-      'DTNA lastChangeTime is stamped with the date/time of each successful DTNA run.',
+      'DTNA lastChangeTime is stamped with the date/time of each successful DTNA run for every row.',
+      'changeCount and changeNotes continue to track actual data changes separately.',
+      'The base initializer starts service_v7.py and requires v5.16.2.',
+      'STOP ALL DIEHL recognizes service_v7.py.',
     ].join('\r\n'));
 
     folder.file('READ ME FIRST.txt', [
-      'DIEHL VIN LOCAL WORKER v5.16.4',
+      'DIEHL VIN LOCAL WORKER v5.16.2',
       '',
-      'This build fixes slow/hung Dealer Reporting loads and keeps per-computer source workbooks.',
+      'This build installs the current v5.16.2 local worker.',
       '1. Extract the entire ZIP.',
       '2. Run STOP ALL DIEHL.cmd.',
       '3. Run START DIEHL VIN.cmd.',
-      '4. Refresh the VIN Platform. It must display worker v5.16.4.',
-      '5. Run DTNA again. The Edge window should no longer show the --no-sandbox warning.',
-      '6. If Dealer Reporting fails its first load, the worker automatically retries it once.',
+      '4. Refresh the VIN Platform. It must display worker v5.16.2.',
+      '5. Run DTNA. Every written DTNA row should receive that run date/time in lastChangeTime.',
     ].join('\r\n'));
 
     const body = await zip.generateAsync({type:'arraybuffer',compression:'DEFLATE',compressionOptions:{level:6}});
     return new Response(body,{status:200,headers:{
       'Content-Type':'application/zip',
-      'Content-Disposition':'attachment; filename="Diehl_VIN_Local_Worker_v5_16_4.zip"',
+      'Content-Disposition':'attachment; filename="Diehl_VIN_Local_Worker_v5_16_2.zip"',
       'Cache-Control':'no-store, no-cache, must-revalidate, max-age=0',
       'X-Diehl-Worker-Package':PACKAGE_VERSION,
       'X-Diehl-Package-Revision':PACKAGE_REF,

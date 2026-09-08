@@ -27,7 +27,7 @@ WORKER_LOG = LOG_DIR / 'worker.log'
 DATABASE_LOG = LOG_DIR / 'database.log'
 SERVICE = ROOT / 'service_v7.py'
 DATABASE_SERVICE = ROOT / 'database_service.py'
-EXPECTED_WORKER_VERSION = '5.16.4'
+EXPECTED_WORKER_VERSION = '5.16.2'
 
 
 def venv_python() -> Path:
@@ -105,7 +105,7 @@ def save_config(workbook: Path) -> None:
     CONFIG.write_text(json.dumps({
         'masterWorkbook': str(workbook),
         'workbookName': WORKBOOK_NAME,
-        'workbookMode': 'per-computer-onedrive-source',
+        'workbookMode': 'shared-onedrive',
         'vinLookupCommand': f'"{py}" "{ROOT / "vin_lookup.py"}"',
         'port': 8765,
         'databasePort': 8766,
@@ -115,16 +115,15 @@ def save_config(workbook: Path) -> None:
 
 def resolve_shared_workbook() -> Path:
     cached = load_cached_path(CONFIG)
-    print('[4/5] Preparing this computer OneDrive source workbook...')
+    print('[4/5] Finding shared OneDrive workbook...')
     print(f'      Runtime Python: {sys.executable}')
-    print(f'      Source workbook name: {WORKBOOK_NAME}')
+    print(f'      Locating shared workbook: {WORKBOOK_NAME}')
     workbook = find_shared_workbook(cached)
-    print(f'      Source workbook: {workbook}')
+    print(f'      Found: {workbook}')
     save_config(workbook)
-    print('      This worker writes only to this computer source workbook.')
+    print('      Shared workbook bound to this worker.')
     print('      VIN In-Service source: OWL exact-field mapper.')
-    print('      DTNA Sales Order/AUTO VIN writes to the same per-computer source workbook.')
-    print('      Successful DTNA runs are archived for download from Run History.')
+    print('      DTNA Sales Order/AUTO VIN remains a separate workflow.')
     return workbook
 
 
