@@ -12,7 +12,7 @@ set "PY312=%LocalAppData%\Programs\Python\Python312\python.exe"
 title Diehl VIN - Setup and Start
 color 0F
 echo ============================================================
-echo  DIEHL VIN - SETUP AND START v5.16.3
+echo  DIEHL VIN - SETUP AND START v5.16.4
 echo ============================================================
 echo.
 echo Permanent runtime:
@@ -21,6 +21,7 @@ echo.
 echo Each PC uses its own OneDrive source workbook.
 echo DTNA and VIN In-Service write only to that computer source workbook.
 echo Every successful DTNA run is archived and downloadable from Export Runs.
+echo DTNA Edge now uses normal Chromium sandboxing and retries Dealer Reporting if the first load hangs.
 echo Website: opens the Diehl VIN Platform after the local services are confirmed ready.
 echo.
 
@@ -111,10 +112,11 @@ if not "%RC%"=="0" goto :fail_initializer
 
 echo.
 echo [5/5] SUCCESS
-echo       Diehl VIN v5.16.3 and Database viewer are running.
+echo       Diehl VIN v5.16.4 and Database viewer are running.
 echo       This PC writes to its own OneDrive source workbook.
 echo       DTNA writes the current run date/time into lastChangeTime for every row.
 echo       Successful DTNA runs are archived for download from the Export Runs page.
+echo       Dealer Reporting now retries automatically if its first page load hangs.
 echo       The Diehl VIN Platform opens after startup and connects to this local worker.
 echo.
 timeout /t 2 /nobreak >nul
