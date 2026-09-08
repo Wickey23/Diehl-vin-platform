@@ -11,10 +11,10 @@ from fastapi.routing import APIRoute
 
 import service_v5 as service
 
-# v5.16.3 starts each new VIN batch immediately in a dedicated local execution
+# v5.16.4 starts each new VIN batch immediately in a dedicated local execution
 # thread. This bypasses stale/failed scheduler state that could leave a newly
 # submitted VIN stuck at queued / 0% without ever opening OWL.
-service.base.VERSION = '5.16.3'
+service.base.VERSION = '5.16.4'
 
 # Employees can use the stable production hostname or a Vercel deployment/branch
 # alias. Permit only Diehl VIN Platform Vercel origins plus local development.
