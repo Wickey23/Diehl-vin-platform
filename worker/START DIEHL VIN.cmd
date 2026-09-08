@@ -12,7 +12,7 @@ set "PY312=%LocalAppData%\Programs\Python\Python312\python.exe"
 title Diehl VIN - Setup and Start
 color 0F
 echo ============================================================
-echo  DIEHL VIN - SETUP AND START v5.16.1
+echo  DIEHL VIN - SETUP AND START v5.16.2
 echo ============================================================
 echo.
 echo Permanent runtime:
@@ -23,6 +23,7 @@ echo Coverage uses Product S/N. Major Components uses Chassis S/N.
 echo Start OWL Check now launches the submitted batch immediately instead of waiting on the old scheduler.
 echo Website: opens the Diehl VIN Platform after the local services are confirmed ready.
 echo DTNA Sales Order/AUTO VIN remains a separate workflow.
+echo DTNA lastChangeTime is stamped with the date/time of each DTNA run.
 echo.
 
 echo [1/5] Installing packaged Diehl program files...
@@ -110,8 +111,9 @@ if not "%RC%"=="0" goto :fail_initializer
 
 echo.
 echo [5/5] SUCCESS
-echo       Diehl VIN v5.16.1 and Database viewer are running.
+echo       Diehl VIN v5.16.2 and Database viewer are running.
 echo       Start OWL Check launches the new VIN batch immediately; no scheduler wait.
+echo       DTNA writes the current run date/time into lastChangeTime for every row.
 echo       Coverage: Product S/N -> verify VIN -> Tab -> wait for actual populated fields.
 echo       Major Components: Chassis S/N -> verify VIN -> Tab -> wait for chassis/component table.
 echo       Product Registration: customer identity/account/address/contact fields.
