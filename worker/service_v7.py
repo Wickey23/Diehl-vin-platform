@@ -6,6 +6,7 @@ import uuid
 
 import uvicorn
 from fastapi import HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
 
 import service_v5 as service
@@ -14,6 +15,23 @@ import service_v5 as service
 # thread. This bypasses stale/failed scheduler state that could leave a newly
 # submitted VIN stuck at queued / 0% without ever opening OWL.
 service.base.VERSION = '5.16'
+
+# Employees can use the stable production hostname or a Vercel deployment/branch
+# alias. Permit only Diehl VIN Platform Vercel origins plus local development.
+# Adding this middleware at the current v5.16 entry point keeps older service
+# layers compatible without opening the local worker to arbitrary websites.
+service.base.app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        'https://diehl-vin-platform.vercel.app',
+        'http://localhost:3000',
+        'http://127.0.0.1:3000',
+    ],
+    allow_origin_regex=r'https://diehl-vin-platform(?:-[a-z0-9-]+)?\.vercel\.app',
+    allow_credentials=False,
+    allow_methods=['*'],
+    allow_headers=['*'],
+)
 
 
 def _remove_route(path: str, method: str) -> None:
