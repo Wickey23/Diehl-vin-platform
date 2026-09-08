@@ -12,14 +12,14 @@ const tabs = [
   { href: '/history', label: 'Export Runs' },
 ];
 
-const LATEST_WORKER_VERSION = '5.16.3';
+const LATEST_WORKER_VERSION = '5.16.4';
 const LATEST_WORKER_UPDATED = '09/08/2026 5:52 PM ET';
 const RELEASE_NOTES = [
-  'Each computer now gets its own OneDrive source workbook instead of every worker writing into the same shared master workbook.',
-  'DTNA and VIN In-Service both use that computer-specific workbook automatically.',
-  'Every successful DTNA run is archived as its own Excel file and can be downloaded from Export Runs.',
-  'DTNA lastChangeTime is stamped with the exact date and time of that successful run for every row.',
-  'Your separate master workbook can pull every DIEHL-VIN-SOURCE_*.xlsx file from the shared OneDrive source folder.',
+  'DTNA Edge now runs with normal Chromium sandboxing instead of the unstable --no-sandbox launch mode.',
+  'The Edge crash-restore bubble is suppressed for the dedicated DTNA browser profile.',
+  'Dealer Reporting now retries automatically once if the first SPA load hangs on the spinner.',
+  'Each computer still writes to its own OneDrive source workbook.',
+  'Every successful DTNA run remains available from Export Runs.',
 ];
 
 export function TopTabs() {
@@ -62,7 +62,7 @@ export function TopTabs() {
             </div>
 
             <div style={{padding:'18px 22px 8px'}}>
-              <p style={{margin:'0 0 12px',color:'#475467',fontSize:14}}>This release moves each computer to its own OneDrive source workbook and adds downloadable DTNA run archives.</p>
+              <p style={{margin:'0 0 12px',color:'#475467',fontSize:14}}>This release fixes the Edge crash/restore state and Dealer Reporting spinner hangs seen during DTNA runs.</p>
               <ul style={{margin:'0 0 8px',paddingLeft:22,color:'#344054',fontSize:14,lineHeight:1.55}}>
                 {RELEASE_NOTES.map((note) => <li key={note} style={{marginBottom:8}}>{note}</li>)}
               </ul>
