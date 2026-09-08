@@ -12,8 +12,10 @@ from pathlib import Path
 import psutil
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 
 from database_cache import read_table
+from run_exports import list_runs, resolve_run
 
 ROOT = Path(__file__).resolve().parent
 CONFIG = ROOT / 'config.json'
@@ -23,7 +25,7 @@ DIEHL_PRODUCTS = {'DiehlVINWorker', 'DiehlVINDatabase'}
 DTNA_RUNTIME = ROOT / 'dtna_runtime.py'
 PROFILE = Path(os.environ.get('LOCALAPPDATA', str(ROOT))) / 'DiehlDTNAManual' / 'browser_profile'
 
-app = FastAPI(title='Diehl VIN Database Viewer', version='2.2')
+app = FastAPI(title='Diehl VIN Database Viewer', version='2.3')
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -66,9 +68,9 @@ def _norm_path(value: str | Path) -> str:
 def open_workbook_locally() -> Path:
     path = workbook_path().resolve()
     if not str(path).strip():
-        raise HTTPException(404, 'No shared Excel workbook is configured yet.')
+        raise HTTPException(404, 'No source Excel workbook is configured yet.')
     if not path.exists():
-        raise HTTPException(404, f'Shared Excel workbook was not found at: {path}')
+        raise HTTPException(404, f'Source Excel workbook was not found at: {path}')
 
     try:
         import pythoncom
@@ -126,7 +128,7 @@ def open_workbook_locally() -> Path:
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(500, f'Excel could not open the shared workbook: {exc}') from exc
+        raise HTTPException(500, f'Excel could not open the source workbook: {exc}') from exc
     finally:
         pythoncom.CoUninitialize()
 
@@ -203,7 +205,7 @@ def _exit_database_service() -> None:
 
 @app.get('/ping')
 def ping():
-    return {'ok': True, 'product': 'DiehlVINDatabase', 'version': '2.2', 'hostname': socket.gethostname()}
+    return {'ok': True, 'product': 'DiehlVINDatabase', 'version': '2.3', 'hostname': socket.gethostname()}
 
 
 @app.get('/database/sheets')
@@ -213,14 +215,14 @@ def sheets():
         'ok': True,
         'workbook': str(path) if str(path) else '',
         'sheets': list(ALLOWED_SHEETS),
-        'mode': 'Verified Excel mirror',
+        'mode': 'Per-computer source workbook',
     }
 
 
 @app.post('/database/open-workbook')
 def open_database_workbook():
     path = open_workbook_locally()
-    return {'ok': True, 'workbook': str(path), 'message': 'Opening the exact shared Excel workbook on this computer.'}
+    return {'ok': True, 'workbook': str(path), 'message': 'Opening this computer source workbook.'}
 
 
 @app.get('/database/{sheet_name}')
@@ -234,6 +236,34 @@ def database_sheet(sheet_name: str, limit: int = Query(default=2000, ge=1, le=10
         return payload
     except Exception as exc:
         raise HTTPException(503, f'Could not read the local verified database mirror: {exc}') from exc
+
+
+@app.get('/runs')
+def runs():
+    path = workbook_path()
+    if not path.exists():
+        raise HTTPException(404, 'This computer source workbook is not available yet.')
+    try:
+        items = list_runs(path)
+        return {'ok': True, 'workbook': str(path), 'runs': items, 'count': len(items)}
+    except Exception as exc:
+        raise HTTPException(500, f'Could not list archived runs: {exc}') from exc
+
+
+@app.get('/runs/download/{filename}')
+def download_run(filename: str):
+    path = workbook_path()
+    try:
+        export = resolve_run(path, filename)
+    except FileNotFoundError:
+        raise HTTPException(404, 'Run export was not found.')
+    except Exception as exc:
+        raise HTTPException(400, f'Invalid run export: {exc}') from exc
+    return FileResponse(
+        str(export),
+        media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        filename=export.name,
+    )
 
 
 @app.get('/dtna/status')
@@ -250,7 +280,7 @@ def dtna_open():
 @app.post('/dtna/sync')
 def dtna_sync():
     launch_dtna_runtime([])
-    return {'ok': True, 'message': 'DTNA runtime started. Successful sync writes Excel and refreshes the Database mirror.'}
+    return {'ok': True, 'message': 'DTNA runtime started. Successful sync writes this PC source workbook, archives the run, and refreshes the Database mirror.'}
 
 
 @app.post('/control/stop-all')
