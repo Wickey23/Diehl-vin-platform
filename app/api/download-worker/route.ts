@@ -6,7 +6,7 @@ export const revalidate = 0;
 
 const REPO = 'Wickey23/Diehl-vin-platform';
 const PACKAGE_VERSION = '5.16';
-const PACKAGE_REF = '31822e94d9b1d46cd66489cfb22a8e6e8a08cf9c';
+const PACKAGE_REF = 'main';
 const FILES = [
   'worker/START DIEHL VIN.cmd',
   'worker/STOP ALL DIEHL.cmd',
@@ -66,20 +66,20 @@ export async function GET() {
 
     folder.file('PACKAGE VERSION.txt', [
       'Diehl VIN Local Worker 5.16',
-      `Pinned package revision: ${PACKAGE_REF}`,
-      'Fixes the installer regression that could start worker v5.12 after the virtual-environment relaunch.',
-      'The base initializer now starts service_v7.py and requires v5.16.',
-      'STOP ALL DIEHL now recognizes service_v7.py.',
+      `Package source: ${PACKAGE_REF}`,
+      'Includes current validated v5.16 startup, worker detection, and local browser compatibility fixes.',
+      'The base initializer starts service_v7.py and requires v5.16.',
+      'STOP ALL DIEHL recognizes service_v7.py.',
     ].join('\r\n'));
 
     folder.file('READ ME FIRST.txt', [
       'DIEHL VIN LOCAL WORKER v5.16',
       '',
-      'This corrected build fixes the v5.16-to-v5.12 startup fallback.',
+      'This build installs the current validated v5.16 local worker.',
       '1. Extract the entire ZIP.',
       '2. Run STOP ALL DIEHL.cmd.',
       '3. Run START DIEHL VIN.cmd.',
-      '4. Refresh the VIN In-Service page. It must display worker v5.16.',
+      '4. Refresh the VIN Platform and click Check again. It must display worker v5.16.',
     ].join('\r\n'));
 
     const body = await zip.generateAsync({type:'arraybuffer',compression:'DEFLATE',compressionOptions:{level:6}});
