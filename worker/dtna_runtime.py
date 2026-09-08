@@ -60,17 +60,22 @@ def change_note(change: dict) -> str:
 
 
 def apply_last_change_time(records: list[dict], changes: list[dict]) -> None:
-    """Never blank DTNA lastChangeTime.
+    """Stamp every DTNA row with the date/time this DTNA run was performed.
 
-    Rule:
-    1. A change detected in this sync gets this sync's exact change timestamp.
-    2. An unchanged row keeps its previous timestamp.
-    3. If snapshot metadata is unavailable, use the persistent change log.
-    4. If this row has never been tracked before, stamp the current sync as its
-       baseline so Excel never contains an empty lastChangeTime.
+    `lastChangeTime` is the latest DTNA refresh/write time, not a per-truck
+    field-change timestamp. Every row written by the same run receives the same
+    timestamp. changeCount/changeNotes still describe actual detected changes.
     """
-    prior_rows = base.previous_snapshot()
+    run_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
+    notes_by_serial: dict[str, list[str]] = {}
+    for change in changes:
+        serial = base.norm_serial(change.get('serialNo'))
+        if not serial:
+            continue
+        notes_by_serial.setdefault(serial, []).append(change_note(change))
+
+    prior_rows = base.previous_snapshot()
     prior_by_serial: dict[str, dict] = {}
     prior_by_vin: dict[str, dict] = {}
     for prior in prior_rows:
@@ -80,34 +85,6 @@ def apply_last_change_time(records: list[dict], changes: list[dict]) -> None:
             prior_by_serial[serial] = prior
         if vin:
             prior_by_vin[vin] = prior
-
-    notes_by_serial: dict[str, list[str]] = {}
-    current_time_by_serial: dict[str, str] = {}
-    for change in changes:
-        serial = base.norm_serial(change.get('serialNo'))
-        if not serial:
-            continue
-        notes_by_serial.setdefault(serial, []).append(change_note(change))
-        when = base.clean(change.get('changeTime'))
-        if when:
-            current_time_by_serial[serial] = when
-
-    history_time_by_serial: dict[str, str] = {}
-    history_path = base.CHANGES_DIR / 'dtna_change_log.csv'
-    if history_path.exists() and history_path.stat().st_size > 0:
-        try:
-            hist = pd.read_csv(history_path, dtype=str).fillna('')
-            for item in hist.to_dict('records'):
-                serial = base.norm_serial(item.get('serialNo'))
-                when = base.clean(item.get('changeTime'))
-                if serial and when:
-                    prior_when = history_time_by_serial.get(serial, '')
-                    if not prior_when or when > prior_when:
-                        history_time_by_serial[serial] = when
-        except Exception as exc:
-            base.log(f'Could not read DTNA change log for lastChangeTime: {exc}')
-
-    baseline_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
     for row in records:
         serial = base.norm_serial(row.get('serialNo'))
@@ -124,16 +101,9 @@ def apply_last_change_time(records: list[dict], changes: list[dict]) -> None:
             row['changeCount'] = prior_count if prior_count else 0
             row['changeNotes'] = prior_notes
 
-        current_change_time = current_time_by_serial.get(serial, '')
-        prior_change_time = base.clean(prior.get('lastChangeTime'))
-        logged_change_time = history_time_by_serial.get(serial, '')
+        row['lastChangeTime'] = run_time
 
-        row['lastChangeTime'] = (
-            current_change_time
-            or prior_change_time
-            or logged_change_time
-            or baseline_time
-        )
+    base.log(f'DTNA lastChangeTime stamped for {len(records)} rows at {run_time}.')
 
 
 def mirror_dataframe(df: pd.DataFrame, destination: Path) -> None:
@@ -172,15 +142,12 @@ _original_writer = base.write_dataframe_into_same_excel
 def write_dtna(df: pd.DataFrame, destination: Path) -> None:
     fixed = normalize_schema(df)
 
-    # Safety check: v5.16.1 must never publish a blank lastChangeTime.
-    blanks = fixed['lastChangeTime'].fillna('').astype(str).str.strip().eq('').sum()
-    if blanks:
+    # Final guard: all rows from one DTNA run must carry a run timestamp.
+    blanks = fixed['lastChangeTime'].fillna('').astype(str).str.strip().eq('')
+    if blanks.any():
         stamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        fixed.loc[
-            fixed['lastChangeTime'].fillna('').astype(str).str.strip().eq(''),
-            'lastChangeTime',
-        ] = stamp
-        base.log(f'Filled {blanks} missing DTNA lastChangeTime values with sync baseline {stamp}.')
+        fixed.loc[blanks, 'lastChangeTime'] = stamp
+        base.log(f'Filled {int(blanks.sum())} missing DTNA lastChangeTime values with run time {stamp}.')
 
     _original_writer(fixed, destination)
     mirror_dataframe(fixed, destination)
