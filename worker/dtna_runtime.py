@@ -239,6 +239,76 @@ def _mirror_dtna_dataframe(df: pd.DataFrame, destination: Path) -> None:
     base.log(f'Refreshed local website DTNA mirror with {len(rows)} collected rows.')
 
 
+def _change_note(change: dict) -> str:
+    change_type = base.clean(change.get('changeType'))
+    field = base.clean(change.get('field'))
+    old_value = base.clean(change.get('oldValue'))
+    new_value = base.clean(change.get('newValue'))
+    if change_type == 'FIELD CHANGED':
+        return f"{field}: {old_value or '[blank]'} -> {new_value or '[blank]'}"
+    if change_type == 'NEW ORDER':
+        return 'NEW ORDER'
+    if change_type == 'ORDER REMOVED':
+        return 'ORDER REMOVED'
+    return change_type or 'Changed'
+
+
+_original_add_change_notes = base.add_change_notes_to_current_rows
+
+
+def preserve_last_change_metadata(records, changes) -> None:
+    """Keep Last Change Time/notes on unchanged rows instead of blanking them every sync."""
+    prior_rows = base.previous_snapshot()
+    prior_by_key = {base.row_key(r): r for r in prior_rows}
+
+    # First let the proven base routine mark changes from THIS sync.
+    _original_add_change_notes(records, changes)
+
+    history_by_serial: dict[str, list[dict]] = {}
+    history_path = base.CHANGES_DIR / 'dtna_change_log.csv'
+    if history_path.exists() and history_path.stat().st_size > 0:
+        try:
+            hist = pd.read_csv(history_path, dtype=str).fillna('')
+            for item in hist.to_dict('records'):
+                serial = base.norm_serial(item.get('serialNo'))
+                if serial:
+                    history_by_serial.setdefault(serial, []).append(item)
+            for serial in history_by_serial:
+                history_by_serial[serial].sort(key=lambda x: base.clean(x.get('changeTime')))
+        except Exception as exc:
+            base.log(f'Could not read DTNA change history while restoring last-change metadata: {exc}')
+
+    current_changed = {base.norm_serial(c.get('serialNo')) for c in changes if base.norm_serial(c.get('serialNo'))}
+
+    for row in records:
+        serial = base.norm_serial(row.get('serialNo'))
+        if serial in current_changed:
+            # A real change happened now, so the base routine's fresh timestamp wins.
+            continue
+
+        prior = prior_by_key.get(base.row_key(row), {})
+        prior_time = base.clean(prior.get('lastChangeTime'))
+        prior_notes = base.clean(prior.get('changeNotes'))
+        prior_count = base.clean(prior.get('changeCount'))
+
+        history = history_by_serial.get(serial, [])
+        latest = history[-1] if history else None
+
+        if not base.clean(row.get('lastChangeTime')):
+            row['lastChangeTime'] = prior_time or (base.clean(latest.get('changeTime')) if latest else '')
+
+        if not base.clean(row.get('changeNotes')):
+            row['changeNotes'] = prior_notes or (_change_note(latest) if latest else '')
+
+        if not base.clean(row.get('changeCount')) or base.clean(row.get('changeCount')) == '0':
+            if prior_count and prior_count != '0':
+                row['changeCount'] = prior_count
+            elif history:
+                row['changeCount'] = len(history)
+            else:
+                row['changeCount'] = 0
+
+
 def write_dataframe_into_same_excel(df: pd.DataFrame, destination: Path) -> None:
     """Write DTNA data into the canonical shared workbook and refresh the website mirror."""
     import pythoncom  # type: ignore
@@ -367,17 +437,13 @@ def write_dataframe_into_same_excel(df: pd.DataFrame, destination: Path) -> None
                 if col:
                     sheet.Columns(col).WrapText = True
                     sheet.Columns(col).ColumnWidth = 24
-            for name, width in {'VIN': 20, 'inServiceDate': 16, 'serialNo': 16, 'leadSerialNo': 18, 'customer': 28, 'statusMsg': 22}.items():
+            for name, width in {'VIN': 20, 'inServiceDate': 16, 'serialNo': 16, 'leadSerialNo': 18, 'customer': 28, 'statusMsg': 22, 'lastChangeTime': 20}.items():
                 col = header_lookup.get(name)
                 if col:
                     sheet.Columns(col).ColumnWidth = width
 
             workbook.Save()
             base.log(f'Updated shared Excel database successfully: {destination} -> DTNA')
-
-            # Critical: the same freshly collected DTNA dataframe is what the web
-            # database must show. Excel remains the shared destination/history,
-            # not the source of the DTNA collection.
             _mirror_dtna_dataframe(df, destination)
             return
         except Exception as exc:
@@ -415,8 +481,9 @@ def write_dataframe_into_same_excel(df: pd.DataFrame, destination: Path) -> None
 
 
 # Override only the fragile integration points. The known-good DTNA browser/data
-# flow remains in dtna_login_and_sync.py.
+# collection stays in dtna_login_and_sync.py.
 base.select_auto_vin = select_auto_vin
+base.add_change_notes_to_current_rows = preserve_last_change_metadata
 base.write_dataframe_into_same_excel = write_dataframe_into_same_excel
 
 
