@@ -11,14 +11,14 @@ from fastapi.routing import APIRoute
 
 import service_v5 as service
 
-# v5.16 starts each new VIN batch immediately in a dedicated local execution
+# v5.16.1 starts each new VIN batch immediately in a dedicated local execution
 # thread. This bypasses stale/failed scheduler state that could leave a newly
 # submitted VIN stuck at queued / 0% without ever opening OWL.
-service.base.VERSION = '5.16'
+service.base.VERSION = '5.16.1'
 
 # Employees can use the stable production hostname or a Vercel deployment/branch
 # alias. Permit only Diehl VIN Platform Vercel origins plus local development.
-# Adding this middleware at the current v5.16 entry point keeps older service
+# Adding this middleware at the current v5.16.1 entry point keeps older service
 # layers compatible without opening the local worker to arbitrary websites.
 service.base.app.add_middleware(
     CORSMiddleware,
@@ -181,8 +181,6 @@ def create_fresh_batch(body: service.base.BatchIn):
     finally:
         c.close()
 
-    # Start BEFORE returning to the browser. The website should see the item
-    # transition to running on its very next refresh and OWL should launch now.
     threading.Thread(target=_process_batch_now, args=(batch_id, vins), daemon=True).start()
     print(f'VIN batch {batch_id}: accepted from website; immediate OWL thread started.', flush=True)
     return {'batchId': batch_id, 'total': len(vins), 'fresh': True, 'execution': 'direct'}
