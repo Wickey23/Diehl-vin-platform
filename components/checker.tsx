@@ -6,7 +6,7 @@ type Batch={id:string;status:string;total_vins:number;lookup_mode:string;created
 type Worker={worker_id:string;hostname:string;dtna_status:string;master_workbook:string;last_seen:string;details:any};
 
 const LOCAL='http://127.0.0.1:8765';
-const REQUIRED_WORKER='5.16.1';
+const REQUIRED_WORKER='5.16.2';
 const modes=[['in_service_customer','In-Service + Customer — recommended'],['fast_in_service','Fast In-Service — date and mileage only'],['full_warranty','Full Warranty Audit — coverage + components']];
 
 function versionParts(v:string){return String(v||'').split('.').map(x=>Number(x)||0)}
