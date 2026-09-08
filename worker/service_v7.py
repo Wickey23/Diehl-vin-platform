@@ -11,15 +11,13 @@ from fastapi.routing import APIRoute
 
 import service_v5 as service
 
-# v5.16.2 starts each new VIN batch immediately in a dedicated local execution
+# v5.16.3 starts each new VIN batch immediately in a dedicated local execution
 # thread. This bypasses stale/failed scheduler state that could leave a newly
 # submitted VIN stuck at queued / 0% without ever opening OWL.
-service.base.VERSION = '5.16.2'
+service.base.VERSION = '5.16.3'
 
 # Employees can use the stable production hostname or a Vercel deployment/branch
 # alias. Permit only Diehl VIN Platform Vercel origins plus local development.
-# Adding this middleware at the current v5.16.2 entry point keeps older service
-# layers compatible without opening the local worker to arbitrary websites.
 service.base.app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -61,7 +59,6 @@ def _finish_batch(batch_id: str) -> None:
 
 
 def _process_batch_now(batch_id: str, vins: list[str]) -> None:
-    """Run one user-started VIN batch immediately, independent of legacy scheduler."""
     c = service.base.conn()
     try:
         row = c.execute('select status from batches where id=?', (batch_id,)).fetchone()
@@ -150,7 +147,7 @@ def create_fresh_batch(body: service.base.BatchIn):
 
     path = service.base.workbook_path()
     if not path.exists():
-        raise HTTPException(409, 'The shared Excel database cannot be found on this computer.')
+        raise HTTPException(409, 'This computer source Excel database cannot be found.')
 
     batch_id = str(uuid.uuid4())
     options = {'workers': 1, 'batchSize': max(1, body.batchSize), 'execution': 'direct'}
