@@ -6,7 +6,7 @@ import {useEffect,useState} from 'react';
 const LOCAL='http://127.0.0.1:8765';
 const LOCAL_DB='http://127.0.0.1:8766';
 const LOGIN_KEY='diehl-dtna-login-initialized-v1';
-const CURRENT_WORKER_VERSION='5.16.3';
+const CURRENT_WORKER_VERSION='5.16.4';
 
 type Check={id:string;label:string;status:'ok'|'warning'|'missing';detail:string};
 
@@ -78,7 +78,7 @@ export default function Initializer(){
 
     {!workerReady&&<section className="download-card">
       <div><span className="kicker">STEP 1 · ONE-TIME SETUP · CURRENT v{CURRENT_WORKER_VERSION}</span><h2>Download Local Worker v{CURRENT_WORKER_VERSION}</h2><p>Download the ZIP, extract it, and double-click <b>START DIEHL VIN.cmd</b>. It installs/updates the runtime, creates this PC&apos;s OneDrive source workbook, starts the local worker, and opens this site.</p></div>
-      <div className="download-actions"><a className="download-primary" href={`/api/download-worker?v=${CURRENT_WORKER_VERSION}`}>Download Local Worker v{CURRENT_WORKER_VERSION}</a><small>Expected ZIP: Diehl_VIN_Local_Worker_v5_16_3.zip · Extract → STOP ALL DIEHL → START DIEHL VIN</small></div>
+      <div className="download-actions"><a className="download-primary" href={`/api/download-worker?v=${CURRENT_WORKER_VERSION}`}>Download Local Worker v{CURRENT_WORKER_VERSION}</a><small>Expected ZIP: Diehl_VIN_Local_Worker_v5_16_4.zip · Extract → STOP ALL DIEHL → START DIEHL VIN</small></div>
     </section>}
 
     {workerReady&&!dtnaReady&&<section className="download-card">
