@@ -5,7 +5,7 @@ export const runtime = 'nodejs';
 export const revalidate = 0;
 
 const REPO = 'Wickey23/Diehl-vin-platform';
-const PACKAGE_VERSION = '5.16';
+const PACKAGE_VERSION = '5.16.1';
 const PACKAGE_REF = 'main';
 const FILES = [
   'worker/START DIEHL VIN.cmd',
@@ -52,40 +52,40 @@ export async function GET() {
     const wrapperInitializer = get('DiehlInitializer_v514.py');
     const service = get('service_v7.py');
 
-    if (!launcher.includes('SETUP AND START v5.16')) throw new Error('Launcher is not v5.16.');
+    if (!launcher.includes('SETUP AND START v5.16.1')) throw new Error('Launcher is not v5.16.1.');
     if (!stopper.includes('service_v7\\.py')) throw new Error('STOP ALL does not recognize service_v7.py.');
     if (!baseInitializer.includes("SERVICE = ROOT / 'service_v7.py'")) throw new Error('Base initializer is not routed to service_v7.py.');
-    if (!baseInitializer.includes("EXPECTED_WORKER_VERSION = '5.16'")) throw new Error('Base initializer is not locked to v5.16.');
-    if (!wrapperInitializer.includes("EXPECTED_WORKER_VERSION = '5.16'")) throw new Error('Wrapper initializer is not v5.16.');
-    if (!service.includes("service.base.VERSION = '5.16'")) throw new Error('Service is not v5.16.');
+    if (!baseInitializer.includes("EXPECTED_WORKER_VERSION = '5.16.1'")) throw new Error('Base initializer is not locked to v5.16.1.');
+    if (!wrapperInitializer.includes("EXPECTED_WORKER_VERSION = '5.16.1'")) throw new Error('Wrapper initializer is not v5.16.1.');
+    if (!service.includes("service.base.VERSION = '5.16.1'")) throw new Error('Service is not v5.16.1.');
 
     const zip = new JSZip();
-    const folder = zip.folder('Diehl_VIN_Local_Worker_v5_16');
+    const folder = zip.folder('Diehl_VIN_Local_Worker_v5_16_1');
     if (!folder) throw new Error('Could not create ZIP folder.');
     for (const file of fetched) folder.file(file.path.replace(/^worker\//, ''), file.text);
 
     folder.file('PACKAGE VERSION.txt', [
-      'Diehl VIN Local Worker 5.16',
+      'Diehl VIN Local Worker 5.16.1',
       `Package source: ${PACKAGE_REF}`,
-      'Includes current validated v5.16 startup, worker detection, and local browser compatibility fixes.',
-      'The base initializer starts service_v7.py and requires v5.16.',
+      'Includes current DTNA change-history retention, DTNA database publishing, worker detection, and browser-start fixes.',
+      'The base initializer starts service_v7.py and requires v5.16.1.',
       'STOP ALL DIEHL recognizes service_v7.py.',
     ].join('\r\n'));
 
     folder.file('READ ME FIRST.txt', [
-      'DIEHL VIN LOCAL WORKER v5.16',
+      'DIEHL VIN LOCAL WORKER v5.16.1',
       '',
-      'This build installs the current validated v5.16 local worker.',
+      'This build installs the current v5.16.1 local worker.',
       '1. Extract the entire ZIP.',
       '2. Run STOP ALL DIEHL.cmd.',
       '3. Run START DIEHL VIN.cmd.',
-      '4. Refresh the VIN Platform and click Check again. It must display worker v5.16.',
+      '4. Refresh the VIN Platform and click Check again. It must display worker v5.16.1.',
     ].join('\r\n'));
 
     const body = await zip.generateAsync({type:'arraybuffer',compression:'DEFLATE',compressionOptions:{level:6}});
     return new Response(body,{status:200,headers:{
       'Content-Type':'application/zip',
-      'Content-Disposition':'attachment; filename="Diehl_VIN_Local_Worker_v5_16.zip"',
+      'Content-Disposition':'attachment; filename="Diehl_VIN_Local_Worker_v5_16_1.zip"',
       'Cache-Control':'no-store, no-cache, must-revalidate, max-age=0',
       'X-Diehl-Worker-Package':PACKAGE_VERSION,
       'X-Diehl-Package-Revision':PACKAGE_REF,
